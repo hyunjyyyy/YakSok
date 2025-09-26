@@ -11,17 +11,29 @@ genai.configure(api_key=GEMINI_API_KEY)
 # =================================================================
 # ✨ 중앙 헬퍼 함수 (Helper Functions)
 # =================================================================
-
-def get_status_by_days_left(days_left):
-    """예상 소진일(days_left)을 입력받아 '위험', '경고', '충분' 상태를 반환합니다."""
+def get_status_by_days_left(days_left, current_stock): # 🚨 current_stock 인자 추가
+    """예상 소진일(days_left)과 현재 재고량(current_stock)을 입력받아 
+       '재고 없음', '위험', '경고', '충분' 상태를 반환합니다."""
+    
+    if current_stock <= 0: # 🚨 재고가 0이하면 무조건 '재고 없음'으로 처리
+        return '위험' 
+        
     if days_left is None:
-        return '충분'
+        # 재고는 있지만(current_stock > 0) ADU가 0이라 소진일 계산 불가한 경우
+        return '충분' 
+    
     if days_left <= 3:
         return '위험'
     elif days_left <= 7:
         return '경고'
     else:
         return '충분'
+
+# =================================================================
+# ✨ 중앙 헬퍼 함수 (Helper Functions)
+# =================================================================
+
+# ... (get_status_by_days_left 함수는 그대로 유지) ...
 
 def _get_full_inventory_status(conn) -> List[Dict[str, Any]]:
     """
@@ -53,8 +65,11 @@ def _get_full_inventory_status(conn) -> List[Dict[str, Any]]:
     for item in items:
         adu = item['adu']
         current_stock = item['current_stock_ea']
+        
+        # 🚨 수정: ADU가 0인 경우 days_left를 None으로 설정
         days_left = current_stock / adu if adu and adu > 0 else None
-        status = get_status_by_days_left(days_left)
+        
+        status = get_status_by_days_left(days_left, current_stock)
         
         inventory_status_list.append({
             "item_id": item['item_id'],
@@ -66,6 +81,7 @@ def _get_full_inventory_status(conn) -> List[Dict[str, Any]]:
             "status": status
         })
     return inventory_status_list
+
 
 def _get_nearing_expiry_batches(conn, threshold_days: int) -> List[Dict[str, Any]]:
     """
@@ -89,6 +105,26 @@ def _get_nearing_expiry_batches(conn, threshold_days: int) -> List[Dict[str, Any
         if isinstance(item.get('expiry_date'), datetime.date):
             item['expiry_date'] = item['expiry_date'].strftime('%Y-%m-%d')
     return expiry_details
+
+# ... (기존 _get_nearing_expiry_batches 함수 정의 아래에 추가) ...
+
+def _get_nearest_expiry(conn, item_id: str) -> str | None:
+    """
+    [헬퍼] 단일 품목의 가장 빠른 유통기한을 조회합니다.
+    """
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT MIN(expiry_date) as nearest_expiry FROM inventory_batches WHERE item_id = %s AND current_batch_ea > 0;", (item_id,))
+        result = cursor.fetchone()
+        
+        if result and result['nearest_expiry']:
+            return result['nearest_expiry'].strftime('%Y-%m-%d')
+        return None
+    except Exception:
+        return None
+    finally:
+        cursor.close()
+
 
 # =================================================================
 # 🏥 API 엔드포인트 (Endpoints)
@@ -141,26 +177,65 @@ def get_alerts_summary():
         if conn and conn.is_connected():
             conn.close()
 
+
 @inventory_api.route('/alerts/details', methods=['GET'])
 def get_alerts_details():
-    """
-    [수정] 재고 부족 및 유통기한 임박 품목의 '상세' 목록을 중앙 헬퍼 함수를 통해 반환합니다.
-    """
     conn = get_db_connection()
     if not conn:
         return jsonify({"message": "Database connection error"}), 500
 
     try:
-        # 1. 상세 재고 부족 목록 (헬퍼 함수 호출 후 필터링)
+        # 1. 전체 재고 상태 조회 및 딕셔너리 생성
         full_status = _get_full_inventory_status(conn)
-        low_stock_details = [item for item in full_status if item['status'] in ['위험', '경고']]
+        status_lookup = {item['item_id']: item for item in full_status}
+
+        # 2. 상세 재고 부족 목록 (low_stock_alert_details)
+        low_stock_details = []
+        for item in full_status:
+            if item['status'] in ['위험', '경고']:
+                
+                # nearest_expiry_date 추가
+                nearest_expiry = _get_nearest_expiry(conn, item['item_id'])
+                
+                # 🚨 days_left 이상치 처리 로직 제거 (원래 값 그대로 사용)
+                days_left_value = item['days_left']
+                
+                low_stock_details.append({
+                    "item_id": item['item_id'],
+                    "item_name": item['item_name'],
+                    "current_stock_ea": item['current_stock_ea'],
+                    "days_left": days_left_value,
+                    "status": item['status'],
+                    "nearest_expiry_date": nearest_expiry # 👈 유통기한 정보 추가
+                })
         low_stock_details.sort(key=lambda x: (x['status'] == '경고', x['days_left'] if x['days_left'] is not None else float('inf')))
 
-        # 2. 상세 유통기한 임박 목록 (헬퍼 함수 직접 호출)
-        expiry_details = _get_nearing_expiry_batches(conn, 30)
+        # 3. 상세 유통기한 임박 목록 (expiry_alert_details)
+        expiry_details_raw = _get_nearing_expiry_batches(conn, 30)
+        
+        expiry_alert_details = []
+        for batch_detail in expiry_details_raw:
+            item_id = batch_detail['item_id']
+            if item_id in status_lookup:
+                stock_info = status_lookup[item_id]
+                
+                # 🚨 days_left 이상치 처리 로직 제거 (원래 값 그대로 사용)
+                days_left_value = stock_info['days_left']
+                
+                # 유통기한 정보에 품목명, 총 재고, 예상 소진일, 배치 유통기한을 포함
+                expiry_alert_details.append({
+                    "item_id": item['item_id'],
+                    "item_name": batch_detail['item_name'],
+                    "batch_id": batch_detail['batch_id'],
+                    "batch_stock_ea": batch_detail['current_batch_ea'],
+                    "expiry_date": batch_detail['expiry_date'],
+                    "current_total_stock_ea": stock_info['current_stock_ea'],
+                    "days_left": days_left_value, # 👈 조정 로직 없이 원래 days_left 값 사용
+                    "status": stock_info['status']
+                })
 
         return jsonify({
-            "expiry_alert_details": expiry_details,
+            "expiry_alert_details": expiry_alert_details,
             "low_stock_alert_details": low_stock_details
         })
     except Exception as e:
@@ -245,33 +320,41 @@ def get_item_details(item_id):
         item_base_info = cursor.fetchone()
         if not item_base_info: return jsonify({"message": f"Item with ID {item_id} not found."}), 404
         
-        # 2. ADU 및 수요 예측
+        current_stock = item_base_info['current_stock_ea'] # 재고량 변수 저장
+
+        # 2. ADU (단일 품목에 대한 쿼리 실행)
         cursor.execute("SELECT SUM(ABS(ea_qty)) / 90 AS adu FROM transactions WHERE item_id = %s AND transaction_type IN ('출고', '폐기') AND transaction_date >= DATE_SUB(NOW(), INTERVAL 90 DAY);", (item_id,))
         
-        # 🚨 오류 수정 부분: fetchone()을 한 번만 호출하고, 그 결과에서 안전하게 값을 추출합니다.
         adu_result = cursor.fetchone()
         
-        # adu_result가 None이 아니면서 'adu' 키가 존재할 경우 값을 사용하고, 아니면 0을 사용합니다.
-        # adu_result.get('adu')가 None일 수 있으므로 이를 다시 확인합니다.
         adu = adu_result.get('adu') if adu_result else 0
-        adu = adu if adu is not None else 0 # MySQL SUM 결과가 NULL일 때 (None) 대비
-
+        adu = adu if adu is not None else 0
+        
         predicted_demand = round(adu * 30)
 
+        # 🚨 수정: ADU가 0인 경우 days_left를 None으로 설정
+        days_left = current_stock / adu if adu and adu > 0 else None
+        
+        # 💡 get_status_by_days_left 함수를 명확하게 호출하여 status 설정
+        status = get_status_by_days_left(days_left, current_stock)
+        
         # 3. 가장 빠른 유통기한
         cursor.execute("SELECT MIN(expiry_date) as nearest_expiry FROM inventory_batches WHERE item_id = %s AND current_batch_ea > 0;", (item_id,))
         nearest_expiry_result = cursor.fetchone()
         
-        # nearest_expiry_result가 None이 아닌지 확인 후 strftime 호출
         nearest_expiry_date = nearest_expiry_result['nearest_expiry'].strftime('%Y-%m-%d') if nearest_expiry_result and nearest_expiry_result['nearest_expiry'] else None
         
         response_data = {
             "item_id": item_id, 
             "item_name": item_base_info['item_name'], 
             "category": item_base_info['category'],
-            "current_stock": int(item_base_info['current_stock_ea']), 
+            "current_stock": int(current_stock), 
             "next_month_predicted_demand": int(predicted_demand),
-            "nearest_expiry_date": nearest_expiry_date
+            "nearest_expiry_date": nearest_expiry_date,
+            "status": status,
+            "adu": round(adu, 2) if adu is not None else 0,
+            # 🚨 days_left가 None이면 JSON에서 null로 반환됨
+            "days_left": round(days_left, 1) if days_left is not None else None
         }
         return jsonify(response_data)
         
@@ -486,21 +569,38 @@ def record_outbound():
         cursor.close()
         conn.close()
 
-@inventory_api.route('/graphs/monthly-io-summary', methods=['GET'])
+@inventory_api.route('/reports/monthly-io-summary', methods=['GET'])
 def get_monthly_io_summary_graph():
     # 독립적인 그래프용 API이므로 유지
     conn = get_db_connection()
     if not conn: return jsonify({"message": "Database connection error"}), 500
     cursor = conn.cursor(dictionary=True)
     try:
-        sql_query = "SELECT DATE_FORMAT(transaction_date, '%%Y-%%m-%%d') as date, SUM(CASE WHEN transaction_type = '입고' THEN ea_qty ELSE 0 END) as inbound, SUM(CASE WHEN transaction_type = '출고' THEN ABS(ea_qty) ELSE 0 END) as outbound, SUM(CASE WHEN transaction_type = '폐기' THEN ABS(ea_qty) ELSE 0 END) as disposal FROM transactions WHERE transaction_date >= DATE_SUB(NOW(), INTERVAL 30 DAY) GROUP BY date ORDER BY date ASC;"
+        # SQL 쿼리: CONCAT 함수를 사용하여 'YYYY-MM-DD' 문자열을 DB에서 직접 생성하여 안정성을 높입니다.
+        # 이 쿼리는 transaction_date의 시간 부분을 무시하고 날짜별로 그룹화합니다.
+        sql_query = """
+            SELECT 
+                CONCAT(YEAR(transaction_date), '-', LPAD(MONTH(transaction_date), 2, '0'), '-', LPAD(DAY(transaction_date), 2, '0')) AS date,
+                SUM(CASE WHEN transaction_type = '입고' THEN ea_qty ELSE 0 END) as inbound, 
+                SUM(CASE WHEN transaction_type = '출고' THEN ABS(ea_qty) ELSE 0 END) as outbound, 
+                SUM(CASE WHEN transaction_type = '폐기' THEN ABS(ea_qty) ELSE 0 END) as disposal 
+            FROM transactions 
+            WHERE transaction_date >= DATE_SUB(NOW(), INTERVAL 30 DAY) 
+            GROUP BY 1  -- 컬럼 인덱스(첫 번째 SELECT 컬럼)를 사용해 그룹화를 강제
+            ORDER BY date ASC;
+        """
         cursor.execute(sql_query)
         graph_data = cursor.fetchall()
+        
         for row in graph_data:
+            # DB가 문자열을 반환하므로, str()로만 변환하고 포맷팅 로직은 제거합니다.
+            row['date'] = str(row['date']) 
             row['inbound'] = int(row['inbound'])
             row['outbound'] = int(row['outbound'])
             row['disposal'] = int(row['disposal'])
+        
         return jsonify(graph_data)
+        
     except Exception as e:
         return jsonify({"message": f"그래프 데이터 조회 중 오류 발생: {str(e)}"}), 500
     finally:
@@ -521,6 +621,7 @@ def get_detailed_monthly_report():
     try:
         # 1. 내부 데이터 집계 (헬퍼 함수 사용)
         full_status = _get_full_inventory_status(conn)
+        # 재고 없음(current_stock <= 0)도 '위험'으로 분류되도록, status 로직 수정 반영
         low_stock_alerts_for_report = [
             {"item_name": item['item_name'], "current_stock": item['current_stock_ea'], "days_left": item['days_left']}
             for item in full_status if item['status'] in ['위험', '경고']
@@ -541,7 +642,7 @@ def get_detailed_monthly_report():
         seasons = {3: "봄 (환절기)", 4: "봄 (환절기)", 5: "봄 (환절기)", 6: "여름", 7: "여름", 8: "여름", 9: "가을 (환절기)", 10: "가을 (환절기)", 11: "가을 (환절기)", 12: "겨울", 1: "겨울", 2: "겨울"}
         current_season = seasons.get(current_month)
 
-        # 3. 강화된 프롬프트 엔지니어링
+        # 3. 강화된 프롬프트 엔지니어링 (HTML 포맷팅 요청 추가)
         prompt = f"""
         당신은 대한민국 소재 동네 이비인후과의 재고 관리를 돕는 AI 컨설턴트입니다.
         아래 제공된 병원의 내부 재고 데이터를 분석하여 원장님을 위한 상세 분석 리포트를 작성해주세요.
@@ -555,9 +656,10 @@ def get_detailed_monthly_report():
             - 현재 계절: {current_season}
 
         **[리포트 작성 가이드]**
+        * **응답 형식:** 프론트엔드에서 가독성이 좋도록 반환해야 합니다. 시각적으로 전문적이고 깔끔하게 디자인되어야 합니다.
         * **제목:** 월간 AI 재고 분석 리포트
-        * **분석 기간:** 최근 30일 ({datetime.date.today().strftime('%Y-%m-%d')} 기준)
-        * **1. 총평:** 재고 관리 성과와 현재 상황을 요약.
+        * **분석 기간:** 분석 기간: 최근 30일 ({datetime.date.today().strftime('%Y-%m-%d')} 기준)\
+        * **1. 총평:** 재고 관리 성과와 현재 상황을 굵은 글씨로 요약.
         * **2. 외부 환경 분석 및 예측:** '현재 계절'을 기반으로 수요 급증 예상 품목 언급.
         * **3. 내부 데이터 심층 분석:** '최다 소모 품목', '재고 부족', '유통기한 임박' 문제 해결을 위한 구체적 조치 제안.
         * **4. 최종 권장 조치 (Action Items):** 즉시 발주해야 할 품목 목록과 이유를 명확하게 제시.
@@ -574,4 +676,78 @@ def get_detailed_monthly_report():
     finally:
         if conn and conn.is_connected():
             cursor.close()
+            conn.close()
+
+@inventory_api.route('/reports/high-disposal-items', methods=['GET'])
+def get_high_disposal_report():
+    """
+    폐기율이 높은 상위 3개 품목의 재고회전율 및 폐기율을 반환합니다.
+    (기간: 최근 90일)
+    """
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"message": "Database connection error"}), 500
+    cursor = conn.cursor(dictionary=True)
+    
+    try:
+        # 🚨 SQL 쿼리: LIMIT을 5에서 3으로 변경
+        sql_query = """
+        WITH ItemUsage AS (
+            SELECT
+                t.item_id,
+                SUM(CASE WHEN t.transaction_type = '폐기' THEN ABS(t.ea_qty) ELSE 0 END) AS total_disposal_qty,
+                SUM(ABS(t.ea_qty)) AS total_usage_and_disposal
+            FROM transactions t
+            WHERE t.transaction_type IN ('출고', '폐기')
+              AND t.transaction_date >= DATE_SUB(NOW(), INTERVAL 90 DAY)
+            GROUP BY t.item_id
+        )
+        SELECT
+            i.item_id,
+            i.item_name,
+            i.current_stock_ea,
+            iu.total_disposal_qty,
+            iu.total_usage_and_disposal,
+            (iu.total_disposal_qty / NULLIF(iu.total_usage_and_disposal, 0)) AS disposal_rate -- 0으로 나누는 것 방지
+        FROM items i
+        JOIN ItemUsage iu ON i.item_id = iu.item_id
+        HAVING iu.total_usage_and_disposal > 0 -- 사용 기록이 있는 품목만
+        ORDER BY disposal_rate DESC, total_disposal_qty DESC
+        LIMIT 3; 
+        """
+        
+        cursor.execute(sql_query)
+        report_data_raw = cursor.fetchall()
+        
+        report_results = []
+        for row in report_data_raw:
+            # 폐기율 (Disposal Rate)
+            disposal_rate = row['disposal_rate']
+            
+            # 재고회전율 (Turnover Rate): (90일 총 사용량) / 현재 재고
+            current_stock = row['current_stock_ea']
+            total_activity = row['total_usage_and_disposal']
+            
+            inventory_turnover = None
+            if current_stock > 0:
+                # 90일 회전율을 연간으로 환산하여 표시 (90일 * 4 = 1년)
+                turnover = (total_activity / current_stock) * 4 
+                inventory_turnover = round(turnover, 2)
+            
+            report_results.append({
+                "item_id": row['item_id'],
+                "item_name": row['item_name'],
+                "disposal_rate": round(disposal_rate * 100, 2), # %로 표시
+                "inventory_turnover_rate": inventory_turnover,
+                "current_stock_ea": int(current_stock),
+                "total_disposal_qty": int(row['total_disposal_qty'])
+            })
+
+        return jsonify(report_results)
+        
+    except Exception as e:
+        return jsonify({"message": f"리포트 조회 중 오류 발생: {str(e)}"}), 500
+    finally:
+        cursor.close()
+        if conn and conn.is_connected():
             conn.close()
