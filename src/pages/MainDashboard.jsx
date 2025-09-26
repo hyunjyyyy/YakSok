@@ -35,7 +35,7 @@ const SummaryCards = () => (
       <Link
         to="/ai-report"
         className="text-sm text-gray-500 mt-2 hover:text-blue-600 hover:underline transition-colors"
-     >
+      >
         월간 리포트에서 자세히 보기 &rarr;
       </Link>
     </div>
@@ -48,16 +48,16 @@ const RealtimeInput = () => {
   return (
     <section className="bg-white rounded-xl shadow p-6">
       <h3 className="font-bold text-lg mb-4">실시간 재고 기록</h3>
-      <div className="flex border border-gray-300 rounded-lg p-1 bg-gray-100 w-min mb-4">
+      <div className="flex border border-gray-300 rounded-lg p-1 bg-gray-100 w-fit mb-6">
         <button
           onClick={() => setInputType('in')}
-          className={`px-6 py-2 text-sm font-bold rounded-md ${inputType === 'in' ? 'bg-white shadow' : 'text-gray-600'}`}
+          className={`px-8 py-2 text-sm font-bold rounded-md ${inputType === 'in' ? 'bg-white shadow' : 'text-gray-600'}`}
         >
           입고
         </button>
         <button
           onClick={() => setInputType('out')}
-          className={`px-6 py-2 text-sm font-bold rounded-md ${inputType === 'out' ? 'bg-white shadow' : 'text-gray-600'}`}
+          className={`px-8 py-2 text-sm font-bold rounded-md ${inputType === 'out' ? 'bg-white shadow' : 'text-gray-600'}`}
         >
           출고
         </button>
@@ -161,9 +161,8 @@ const AlertList = () => {
               <tr key={item.id} className="border-t hover:bg-gray-50">
                 <td className="px-6 py-4 font-bold text-gray-900">
                   <span
-                    className={`inline-flex items-center px-2 py-1 mr-2 rounded-full text-xs font-bold ${
-                      item.status === '부족' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
-                    }`}
+                    className={`inline-flex items-center px-2 py-1 mr-2 rounded-full text-xs font-bold ${item.status === '부족' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
+                      }`}
                   >
                     {item.status === '부족' ? '재고 부족' : '기한 임박'}
                   </span>
