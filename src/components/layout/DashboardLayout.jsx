@@ -179,7 +179,7 @@ const DashboardLayout = () => {
 
                                 {/* 품목별 소모량 Bar Chart */}
                                 {report.graphs?.by_item && (
-                                    <div>
+                                    <div className="w-full max-w-xl mx-auto"> {/* <- MODIFIED HERE: 최대 너비를 줄이고 가운데 정렬 */}
                                         <h3 className="text-lg font-bold mb-2">품목별 소모량</h3>
                                         <Bar
                                             data={{
@@ -187,7 +187,7 @@ const DashboardLayout = () => {
                                                 datasets: [{
                                                     label: '소모량',
                                                     data: report.graphs.by_item.map(i => i.quantity),
-                                                    backgroundColor: 'rgba(79, 70, 229, 0.7)',
+                                                    backgroundColor: 'rgba(91, 192, 150, 0.7)',
                                                 }],
                                             }}
                                             options={{ responsive: true, plugins: { legend: { display: false } } }}
@@ -197,14 +197,14 @@ const DashboardLayout = () => {
 
                                 {/* 카테고리별 소모량 Pie Chart */}
                                 {report.graphs?.by_category && (
-                                    <div>
+                                    <div className="w-full max-w-md mx-auto"> {/* <- MODIFIED HERE: 최대 너비를 더 줄여서 파이 차트 크기 조정 및 가운데 정렬 */}
                                         <h3 className="text-lg font-bold mb-2">카테고리별 소모량</h3>
                                         <Pie
                                             data={{
                                                 labels: report.graphs.by_category.map(c => c.category),
                                                 datasets: [{
                                                     data: report.graphs.by_category.map(c => c.quantity),
-                                                    backgroundColor: ['#6366F1', '#EC4899', '#FBBF24', '#10B981', '#F87171'],
+                                                    backgroundColor: ['#2e6e4bff', '#59c195ff', '#80f9a2ff', '#4d6e9fff', '#F87171'],
                                                 }],
                                             }}
                                             options={{ responsive: true }}
@@ -214,7 +214,7 @@ const DashboardLayout = () => {
 
                                 {/* 출고 vs 폐기 Stacked Bar Chart */}
                                 {report.graphs?.usage_vs_disposal && (
-                                    <div>
+                                    <div className="w-full max-w-xl mx-auto"> {/* <- MODIFIED HERE: 최대 너비를 줄이고 가운데 정렬 */}
                                         <h3 className="text-lg font-bold mb-2">출고 vs 폐기</h3>
                                         <Bar
                                             data={{
