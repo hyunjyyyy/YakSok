@@ -1,6 +1,21 @@
 import React, { useState, useRef } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import logo from "../../assets/logo.png";
+import { Bar, Pie } from 'react-chartjs-2';
+
+import {
+    Chart as ChartJS,
+    CategoryScale,
+    LinearScale,
+    BarElement,
+    Title,
+    Tooltip,
+    Legend,
+    ArcElement
+} from 'chart.js';
+
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);
+
 
 // --- 아이콘 컴포넌트 ---
 const SearchIcon = () => (
@@ -140,23 +155,14 @@ const DashboardLayout = () => {
                             {/* 제목 */}
                             <h2 className="text-3xl font-bold text-gray-800 mb-6">AI 리포트</h2>
 
-                            {/* 내용 영역 */}
-                            <div className="prose prose-sm md:prose-base text-gray-700">
-                                {/* report_text를 Markdown 스타일로 표시 */}
+                            {/* 텍스트 */}
+                            <div className="prose prose-sm md:prose-base text-gray-700 mb-6">
                                 {report.report_text.split('\n').map((line, idx) => {
                                     line = line.trim();
                                     if (!line) return <br key={idx} />;
-
-                                    // 제목 처리 (##, ### 등)
-                                    if (line.startsWith('### ')) {
-                                        return <h3 key={idx} className="text-lg font-semibold mt-4 mb-2">{line.replace('### ', '')}</h3>;
-                                    } else if (line.startsWith('## ')) {
-                                        return <h2 key={idx} className="text-xl font-bold mt-6 mb-3">{line.replace('## ', '')}</h2>;
-                                    } else if (line.startsWith('# ')) {
-                                        return <h1 key={idx} className="text-2xl font-extrabold mt-6 mb-3">{line.replace('# ', '')}</h1>;
-                                    }
-
-                                    // 강조 처리 (**) → 굵게
+                                    if (line.startsWith('### ')) return <h3 key={idx} className="text-lg font-semibold mt-4 mb-2">{line.replace('### ', '')}</h3>;
+                                    if (line.startsWith('## ')) return <h2 key={idx} className="text-xl font-bold mt-6 mb-3">{line.replace('## ', '')}</h2>;
+                                    if (line.startsWith('# ')) return <h1 key={idx} className="text-2xl font-extrabold mt-6 mb-3">{line.replace('# ', '')}</h1>;
                                     const parts = line.split(/\*\*(.+?)\*\*/g);
                                     return (
                                         <p key={idx} className="mb-2">
@@ -167,6 +173,76 @@ const DashboardLayout = () => {
                                     );
                                 })}
                             </div>
+
+                            {/* 그래프 섹션 */}
+                            <div className="space-y-8">
+
+                                {/* 품목별 소모량 Bar Chart */}
+                                {report.graphs?.by_item && (
+                                    <div>
+                                        <h3 className="text-lg font-bold mb-2">품목별 소모량</h3>
+                                        <Bar
+                                            data={{
+                                                labels: report.graphs.by_item.map(i => i.item_name),
+                                                datasets: [{
+                                                    label: '소모량',
+                                                    data: report.graphs.by_item.map(i => i.quantity),
+                                                    backgroundColor: 'rgba(79, 70, 229, 0.7)',
+                                                }],
+                                            }}
+                                            options={{ responsive: true, plugins: { legend: { display: false } } }}
+                                        />
+                                    </div>
+                                )}
+
+                                {/* 카테고리별 소모량 Pie Chart */}
+                                {report.graphs?.by_category && (
+                                    <div>
+                                        <h3 className="text-lg font-bold mb-2">카테고리별 소모량</h3>
+                                        <Pie
+                                            data={{
+                                                labels: report.graphs.by_category.map(c => c.category),
+                                                datasets: [{
+                                                    data: report.graphs.by_category.map(c => c.quantity),
+                                                    backgroundColor: ['#6366F1', '#EC4899', '#FBBF24', '#10B981', '#F87171'],
+                                                }],
+                                            }}
+                                            options={{ responsive: true }}
+                                        />
+                                    </div>
+                                )}
+
+                                {/* 출고 vs 폐기 Stacked Bar Chart */}
+                                {report.graphs?.usage_vs_disposal && (
+                                    <div>
+                                        <h3 className="text-lg font-bold mb-2">출고 vs 폐기</h3>
+                                        <Bar
+                                            data={{
+                                                labels: report.graphs.usage_vs_disposal.map(i => i.item_name),
+                                                datasets: [
+                                                    {
+                                                        label: '출고',
+                                                        data: report.graphs.usage_vs_disposal.map(i => i['출고']),
+                                                        backgroundColor: 'rgba(34, 197, 94, 0.7)',
+                                                    },
+                                                    {
+                                                        label: '폐기',
+                                                        data: report.graphs.usage_vs_disposal.map(i => i['폐기']),
+                                                        backgroundColor: 'rgba(239, 68, 68, 0.7)',
+                                                    }
+                                                ]
+                                            }}
+                                            options={{
+                                                responsive: true,
+                                                plugins: { legend: { position: 'top' } },
+                                                scales: { x: { stacked: true }, y: { stacked: true } }
+                                            }}
+                                        />
+                                    </div>
+                                )}
+
+                            </div>
+
                         </div>
                     </div>
                 )}
