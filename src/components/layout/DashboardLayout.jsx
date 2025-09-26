@@ -28,10 +28,11 @@ const Navigation = () => {
     const pathname = location.pathname;
 
     return (
-        <nav className="flex space-x-2 px-4 border-b bg-white sticky top-[80px] z-10">
+        <nav className="flex space-x-2 px-4 border-b bg-white sticky top-[64px] z-10">
             <Link to="/" className={`px-3 py-3 font-bold text-sm ${pathname === '/' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-blue-600'}`}>대시보드</Link>
             <Link to="/inventory" className={`px-3 py-3 font-bold text-sm ${pathname === '/inventory' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-blue-600'}`}>재고 리스트</Link>
             <Link to="/ai-report" className={`px-3 py-3 font-bold text-sm ${pathname === '/ai-report' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-blue-600'}`}>AI 리포트</Link>
+            <Link to="/map" className={`px-3 py-3 font-bold text-sm ${pathname === '/map' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-blue-600'}`}>재고 연계</Link>
         </nav>
     );
 };

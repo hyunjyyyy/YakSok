@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import DashboardLayout from './components/layout/DashboardLayout';
 import MainDashboard from './pages/MainDashboard';
 import InventoryListPage from './pages/InventoryListPage';
+import MapPage from './pages/MapPage';
 // import DetailPage from './pages/DetailPage';
 // <Route path="/detail/:itemId" element={<DetailPage />} />
 
@@ -19,6 +20,7 @@ function App() {
           <Route element={<DashboardLayout />}>
             <Route path="/" element={<MainDashboard />} />
             <Route path="/inventory" element={<InventoryListPage />} />
+            <Route path="/map" element={<MapPage />} />
           </Route>
         </Routes>
       </BrowserRouter>
