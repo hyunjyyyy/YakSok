@@ -151,6 +151,13 @@ const DashboardLayout = () => {
                             >
                                 ✕
                             </button>
+                            {/* PDF 다운로드 버튼 (모달 내부 우상단) */}
+                            <button
+                                // onClick={handleDownloadModalPdf}
+                                className="absolute top-5 right-16 bg-[#2F6F59] text-white text-sm font-bold px-3 py-1.5 rounded-lg hover:opacity-90"
+                            >
+                                PDF 다운로드
+                            </button>
 
                             {/* 제목 */}
                             <h2 className="text-3xl font-bold text-gray-800 mb-6">AI 리포트</h2>
