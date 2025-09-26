@@ -1,13 +1,19 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom'; // react-router-dom 설치 필요
+import expired from "../assets/expired.png";
+import shortage from "../assets/shortage.png";
+import ai from "../assets/ai_report.png";
+// import realtime from "../assets/realtime.png";
+// import emergency from "../assets/emergency.png";
 
 
 // --- 상단 대시보드 카드들  ---
 const SummaryCards = () => (
   <section className="grid grid-cols-1 md:grid-cols-4 gap-6">
     <div className="bg-white rounded-xl shadow p-6 flex flex-col">
-      <div className="flex items-center justify-between">
-        <h3 className="font-bold text-gray-600">유통기한 임박</h3>
+      <div className="flex items-center gap-1">
+        <img src={expired} alt="expired" className="w-6 h-6" />
+        <h3 className="font-bold text-gray-600 -ml-1"> 유통기한 임박</h3>
       </div>
       <p className="text-3xl font-extrabold mt-4">
         5 <span className="text-lg font-semibold text-gray-500">품목</span>
@@ -16,7 +22,8 @@ const SummaryCards = () => (
     </div>
 
     <div className="bg-white rounded-xl shadow p-6 flex flex-col">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center gap-1">
+        <img src={shortage} alt="shortage" className="w-6 h-6" />
         <h3 className="font-bold text-gray-600">부족 재고</h3>
       </div>
       <p className="text-3xl font-extrabold mt-4">
@@ -26,7 +33,8 @@ const SummaryCards = () => (
     </div>
 
     <div className="bg-white rounded-xl shadow p-6 md:col-span-2 flex flex-col">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center gap-1">
+        <img src={ai} alt="ai" className="w-6 h-6" />
         <h3 className="font-bold text-gray-600">AI 리포트</h3>
       </div>
       <p className="text-xl font-bold text-gray-800 mt-4 flex-grow">
@@ -114,7 +122,8 @@ const RealtimeInput = () => {
               <input type="text" id="notes" className="w-full border border-gray-300 rounded-md shadow-sm" placeholder="특이사항 입력 (선택)" />
             </div>
             <div className="md:col-span-1">
-              <button className="w-full bg-slate-800 text-white font-bold py-2.5 rounded-lg hover:bg-slate-900 transition-colors">
+              <button className="w-full text-white font-bold py-2.5 rounded-lg hover:bg-[#255844] transition-colors"
+                style={{ backgroundColor: '#2F6F59' }}>
                 기록
               </button>
             </div>
@@ -122,7 +131,8 @@ const RealtimeInput = () => {
         ) : (
           <>
             <div className="md:col-span-2">
-              <button className="w-full bg-slate-800 text-white font-bold py-2.5 rounded-lg hover:bg-slate-900 transition-colors">
+              <button className="w-[180px] bg-slate-800 text-white font-bold py-2.5 rounded-lg hover:bg-[#255844] transition-colors"
+                style={{ backgroundColor: '#2F6F59' }}>
                 기록
               </button>
             </div>
