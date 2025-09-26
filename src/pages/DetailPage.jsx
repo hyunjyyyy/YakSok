@@ -1,32 +1,112 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useLocation, Link } from 'react-router-dom';
 import axios from 'axios';
+// BarChart, Bar 컴포넌트 임포트 유지
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts';
 
-/** 상대 경로 우선 (/api 프록시 사용). 필요 시 VITE_API_URL_BASE로 절대 경로 전환 */
-const API_BASE = import.meta.env.VITE_API_URL_BASE || '';
-const detailsUrl = (id) =>
-  API_BASE ? `${API_BASE}/api/items/${id}/details`
-           : `/api/items/${id}/details`;
+/** API_BASE 정의 (data.js와 동일하게 절대 경로 사용) */
+const NGROK_FALLBACK_URL = 'https://fcc0b7ff67e7.ngrok-free.app';
+const API_BASE = import.meta.env.VITE_API_URL_BASE || NGROK_FALLBACK_URL;
+const API_BASE_CLEAN = API_BASE.replace(/\/$/, ''); 
+
+// API 기본 접두사
+const API_PREFIX = '/api/items/';
+const NGROK_HEADER = { 'ngrok-skip-browser-warning': 'true' };
+
+const endpoints = {
+  details: (id) => `${API_BASE_CLEAN}${API_PREFIX}${id}/details`,
+  usage1y: (id) => `${API_BASE_CLEAN}${API_PREFIX}${id}/usage/1y`,
+  usage5y: (id) => `${API_BASE_CLEAN}${API_PREFIX}${id}/usage/5y`,
+};
 
 /** 서버 응답 → UI 데이터 정규화 */
-const normalizeDetail = (d) => {
+const normalizeDetail = (d, urlItemId, usage1y, usage5y) => {
   if (!d) return null;
   return {
-    id: d.item_id,
-    name: d.item_name,
-    category: d.category,
-    currentStock: Number(d.current_stock ?? d.current_stock_ea ?? 0),
+    id: d.item_id || urlItemId, 
+    name: d.item_name || '이름 없음', 
+    category: d.category || '카테고리 없음',
+    
+    currentStock: Number(d.current_stock ?? 0),
     predictedNextMonth: Number(d.next_month_predicted_demand ?? 0),
     nearestExpiry: d.nearest_expiry_date ?? '-',
-    // [{month: 'YYYY-MM', usage: number}]
-    trend5y: Array.isArray(d.usage_trend_5y) ? d.usage_trend_5y : [],
-    pattern1y: Array.isArray(d.monthly_usage_pattern_1y) ? d.monthly_usage_pattern_1y : [],
+    
+    pattern1y: Array.isArray(usage1y.monthly_usage_pattern_1y) ? usage1y.monthly_usage_pattern_1y : [],
+    trend5y: Array.isArray(usage5y.usage_trend_5y) ? usage5y.usage_trend_5y : [],
   };
 };
 
-/** 간단 바차트 바(가로막대) */
-const Bar = ({ value, max, label, subLabel }) => {
-  const width = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0; // 최소 2%
+// --- Line/Bar Chart 통합 Component ---
+const ChartComponent = ({ title, data, dataKey, xKey, barName, isYearly }) => {
+    
+    if (!data || data.length === 0) {
+        return (
+            <Card title={title} accent="border-slate-400">
+                <p className="text-sm text-gray-500">데이터가 없습니다.</p>
+            </Card>
+        );
+    }
+    
+    const xAxisFormatter = (label) => {
+        if (!label || typeof label !== 'string') return '';
+        return isYearly ? label : `${label.split('-').pop()}월`;
+    };
+    
+    const yAxisFormatter = (value) => `${value.toLocaleString()} EA`;
+    const tooltipLabelFormatter = (label) => isYearly ? `${label}년` : `${label.split('-').pop()}월`;
+
+    const ChartType = isYearly ? BarChart : LineChart;
+    const VisualizationElement = isYearly ? Bar : Line; // recharts의 Bar/Line 컴포넌트 사용
+    const strokeColor = isYearly ? '#2F6F59' : '#2F6F59';
+
+    return (
+        <Card title={title} accent="border-slate-400">
+            <div style={{ width: '100%', height: 350 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                    <ChartType
+                        data={data}
+                        margin={{ top: 15, right: 30, left: 10, bottom: 5 }}
+                        barCategoryGap={isYearly ? '80%' : undefined} 
+                        barGap={isYearly ? 4 : undefined} 
+                    >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                        <XAxis 
+                            dataKey={xKey} 
+                            tick={{ fontSize: 12 }}
+                            tickFormatter={xAxisFormatter}
+                            interval={'preserveStartEnd'} 
+                        />
+                        <YAxis 
+                            tickFormatter={yAxisFormatter} 
+                            tick={{ fontSize: 12 }} 
+                        />
+                        <Tooltip 
+                            cursor={isYearly ? { fill: '#f3f4f6' } : { strokeDasharray: '3 3' }}
+                            formatter={(value) => [`${value.toLocaleString()} EA`, barName]}
+                            labelFormatter={tooltipLabelFormatter}
+                        />
+                        <Legend wrapperStyle={{ paddingTop: '10px' }}/>
+                        <VisualizationElement 
+                            type={isYearly ? undefined : 'monotone'}
+                            dataKey={dataKey} 
+                            fill={isYearly ? strokeColor : undefined}
+                            stroke={strokeColor} 
+                            activeDot={{ r: 8 }} 
+                            name={barName} 
+                            strokeWidth={2} 
+                            maxBarSize={isYearly ? 50 : undefined} // 🚨 막대의 최대 너비를 50px로 고정
+                        />
+                    </ChartType>
+                </ResponsiveContainer>
+            </div>
+        </Card>
+    );
+};
+
+// --- 유틸리티 컴포넌트 ---
+// 🚨 이름 변경: Bar -> BarVisualization (Recharts Bar와 충돌 방지)
+const BarVisualization = ({ value, max, label, subLabel }) => {
+  const width = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
   return (
     <div className="mb-2">
       <div className="flex justify-between text-xs text-gray-500">
@@ -44,7 +124,6 @@ const Bar = ({ value, max, label, subLabel }) => {
   );
 };
 
-/** 섹션 카드 */
 const Card = ({ title, right, children, accent = 'border-emerald-500' }) => (
   <section className={`bg-white rounded-xl shadow-md p-6 border-l-4 ${accent}`}>
     <div className="flex items-center justify-between mb-4">
@@ -55,6 +134,10 @@ const Card = ({ title, right, children, accent = 'border-emerald-500' }) => (
   </section>
 );
 
+
+// ----------------------------------------------------------------------------------
+// --- DetailPage Component ---
+// ----------------------------------------------------------------------------------
 const DetailPage = () => {
   const { itemId } = useParams();
   const location = useLocation();
@@ -76,20 +159,68 @@ const DetailPage = () => {
   );
   const [loading, setLoading] = useState(!fromList);
   const [error, setError] = useState(null);
+  
+  const inventoryStatus = useMemo(() => {
+    if (loading || error || item?.predictedNextMonth == null) return { label: '조회 중', color: 'bg-gray-200', text: 'text-gray-700' };
+    const stock = item.currentStock;
+    const demand = item.predictedNextMonth;
+
+    if (stock === 0) return { label: '❌ 재고 없음', color: 'bg-red-100', text: 'text-red-700' };
+    if (demand > 0 && stock < demand) return { label: '❌ 부족', color: 'bg-red-100', text: 'text-red-700' };
+    if (demand > 0 && stock < demand * 2) return { label: '⚠️ 주의', color: 'bg-yellow-100', text: 'text-yellow-700' };
+    
+    return { label: '✅ 충분', color: 'bg-emerald-100', text: 'text-emerald-700' };
+  }, [item, loading, error]);
+
+  const expiryDateClass = useMemo(() => {
+    if (!item?.nearestExpiry || item.nearestExpiry === '-') return 'font-bold text-gray-700';
+    const expiryDate = new Date(item.nearestExpiry);
+    const today = new Date();
+    const daysLeft = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (daysLeft <= 30) {
+      return 'font-bold text-red-600';
+    }
+    return 'font-bold text-gray-700';
+  }, [item]);
+  
+  const max5y = useMemo(
+    () => Math.max(0, ...((item?.trend5y || []).map((x) => Number(x.usage) || 0))),
+    [item]
+  );
+
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       setLoading(true);
       try {
-        const { data } = await axios.get(detailsUrl(itemId));
-        const normalized = normalizeDetail(data);
-        if (!normalized) throw new Error('상세 데이터가 없습니다.');
+        const [detailsRes, usage1yRes, usage5yRes] = await Promise.all([
+          axios.get(endpoints.details(itemId), { headers: NGROK_HEADER }),
+          axios.get(endpoints.usage1y(itemId), { headers: NGROK_HEADER }),
+          axios.get(endpoints.usage5y(itemId), { headers: NGROK_HEADER }),
+        ]);
+
+        const normalized = normalizeDetail(
+          detailsRes.data,
+          itemId,
+          usage1yRes.data,
+          usage5yRes.data
+        );
+        
+        if (!normalized || !normalized.id) { 
+             throw new Error('API 응답에 유효한 품목 ID가 포함되어 있지 않습니다.');
+        }
         if (mounted) setItem(normalized);
       } catch (e) {
         console.error('[details fetch]', e);
-        // 목록에서 받은 데이터가 있으면 화면은 유지
-        if (!fromList && mounted) setError(e?.message || '상세 데이터를 불러오지 못했습니다.');
+        if (mounted) {
+            if (!fromList) {
+                setError(e?.message || '상세 데이터를 불러오지 못했습니다.');
+            } else {
+                setError('API 호출에 문제가 발생했으나, 기본 정보는 표시합니다.');
+            }
+        }
       } finally {
         if (mounted) setLoading(false);
       }
@@ -99,18 +230,9 @@ const DetailPage = () => {
     };
   }, [itemId]);
 
-  // 사용량 시리즈 최대값(바 너비 계산용)
-  const max5y = useMemo(
-    () => Math.max(0, ...((item?.trend5y || []).map((x) => Number(x.usage) || 0))),
-    [item]
-  );
-  const max1y = useMemo(
-    () => Math.max(0, ...((item?.pattern1y || []).map((x) => Number(x.usage) || 0))),
-    [item]
-  );
 
   if (!item && loading) return <main className="p-8">불러오는 중...</main>;
-  if (!item && error) return <main className="p-8 text-red-600">{error}</main>;
+  if (!item && error) return <main className="p-8 text-red-600 font-bold">{error}</main>;
   if (!item) return <main className="p-8">데이터가 없습니다.</main>;
 
   return (
@@ -128,6 +250,7 @@ const DetailPage = () => {
         <p className="text-gray-500 text-sm mt-1">
           {item.id} · {item.category} {item.nearestExpiry && `· 최근접 유통기한: ${item.nearestExpiry}`}
         </p>
+        {error && <p className="text-red-600 mt-2 text-sm font-bold">⚠️ {error}</p>}
       </div>
 
       {/* 핵심 카드 */}
@@ -135,8 +258,8 @@ const DetailPage = () => {
         <Card
           title="✅ 핵심 지표"
           right={
-            <span className="text-xs px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
-              실시간 조회
+            <span className={`text-xs px-2 py-1 rounded-full ${inventoryStatus.color} ${inventoryStatus.text} font-bold`}>
+              {inventoryStatus.label}
             </span>
           }
         >
@@ -153,12 +276,12 @@ const DetailPage = () => {
             )}
             <li className="flex justify-between">
               <span>최근접 유통기한</span>
-              <span className="font-bold">{item.nearestExpiry || '-'}</span>
+              <span className={expiryDateClass}>{item.nearestExpiry || '-'}</span>
             </li>
           </ul>
         </Card>
 
-        <Card title="💡 인사이트 (자동 요약)" accent="border-indigo-500">
+        <Card title="💡 인사이트 (자동 요약)" accent="border-slate-400">
           <ul className="list-disc pl-5 text-sm text-gray-700 space-y-2">
             <li>
               {item.predictedNextMonth != null
@@ -168,65 +291,34 @@ const DetailPage = () => {
                 ? '→ 추가 발주 필요 가능성'
                 : '→ 당분간 재고 여유 있음'}
             </li>
-            {item.nearestExpiry && <li>가장 임박한 유통기한: <b>{item.nearestExpiry}</b></li>}
+            {item.nearestExpiry && <li>가장 임박한 유통기한: <b className={expiryDateClass}>{item.nearestExpiry}</b></li>}
             {item.pattern1y?.length > 0 && <li>최근 1년 월별 사용 패턴을 기반으로 비수기/성수기 차이를 반영해 발주량을 조정하세요.</li>}
           </ul>
         </Card>
       </div>
+      
+      {/* 3. 차트 섹션 */}
+      <section className="space-y-6">
+          {/* 5년 사용량 추이 (세로 막대 그래프) */}
+          <ChartComponent 
+              title="📈 최근 5년 사용 추이 (연도별)"
+              data={item.trend5y}
+              dataKey="usage"
+              xKey="year" 
+              barName="연간 사용량"
+              isYearly={true} // Bar Chart 렌더링
+          />
 
-      {/* 사용량 추이 5년 */}
-      <Card title="📈 최근 5년 사용량 추이 (월별)">
-        {item.trend5y?.length ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              {item.trend5y.map((row) => (
-                <Bar
-                  key={row.month}
-                  value={Number(row.usage) || 0}
-                  max={max5y}
-                  label={row.month}
-                />
-              ))}
-            </div>
-            <div className="text-sm text-gray-600">
-              <p className="mb-2">설명</p>
-              <ul className="list-disc pl-5 space-y-1">
-                <li>월별 출고/폐기량 합계(절대값 기준)</li>
-                <li>최근 5년 데이터 기반으로 이상 피크 및 저점을 파악</li>
-              </ul>
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm text-gray-500">데이터가 없습니다.</p>
-        )}
-      </Card>
-
-      {/* 월별 패턴 1년 */}
-      <Card title="📊 최근 1년 월별 사용 패턴">
-        {item.pattern1y?.length ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              {item.pattern1y.map((row) => (
-                <Bar
-                  key={row.month}
-                  value={Number(row.usage) || 0}
-                  max={max1y}
-                  label={row.month}
-                />
-              ))}
-            </div>
-            <div className="text-sm text-gray-600">
-              <p className="mb-2">설명</p>
-              <ul className="list-disc pl-5 space-y-1">
-                <li>최근 12개월 사용량</li>
-                <li>다음 달 발주량 산정 시 계절성 반영</li>
-              </ul>
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm text-gray-500">데이터가 없습니다.</p>
-        )}
-      </Card>
+          {/* 1년 월별 사용 패턴 (꺾은선 그래프) */}
+          <ChartComponent 
+              title="📊 최근 1년 월별 사용 패턴"
+              data={item.pattern1y}
+              dataKey="usage"
+              xKey="month" 
+              barName="월별 사용량"
+              isYearly={false} // Line Chart 렌더링
+          />
+      </section>
     </main>
   );
 };

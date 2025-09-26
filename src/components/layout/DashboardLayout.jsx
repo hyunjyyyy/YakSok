@@ -39,7 +39,7 @@ const Header = () => {
                 </div>
             </div>
             <button className="bg-white/90 text-gray-800 font-bold px-4 py-2 rounded-lg hover:bg-white transition-colors flex items-center text-sm">
-                <ReportIcon /> CSV / AI 리포트
+                <ReportIcon /> CSV ➔ AI 리포트
             </button>
         </header>
     );
