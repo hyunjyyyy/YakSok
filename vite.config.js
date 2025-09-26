@@ -16,6 +16,11 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api/, ''),
         // SSL 인증서 관련 문제를 방지하는 설정입니다.
         secure: false,
+      },
+      '/csv': {
+        target: 'https://fcc0b7ff67e7.ngrok-free.app',
+        changeOrigin: true,
+        secure: false,
       }
     }
   }
