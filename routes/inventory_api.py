@@ -2,12 +2,20 @@ import mysql.connector
 import datetime
 from flask import Blueprint, jsonify, request
 from db import get_db_connection
+from config import GEMINI_API_KEY
+import google.generativeai as genai
+from typing import List, Dict, Any
 
-# 헬퍼 함수: 예상 소진일에 따라 상태를 반환
+genai.configure(api_key=GEMINI_API_KEY)
+
+# =================================================================
+# ✨ 중앙 헬퍼 함수 (Helper Functions)
+# =================================================================
+
 def get_status_by_days_left(days_left):
     """예상 소진일(days_left)을 입력받아 '위험', '경고', '충분' 상태를 반환합니다."""
     if days_left is None:
-        return '충분' # 사용 기록이 없는 경우
+        return '충분'
     if days_left <= 3:
         return '위험'
     elif days_left <= 7:
@@ -15,111 +23,324 @@ def get_status_by_days_left(days_left):
     else:
         return '충분'
 
-# Blueprint 인스턴스 생성
+def _get_full_inventory_status(conn) -> List[Dict[str, Any]]:
+    """
+    [헬퍼] 모든 품목의 상세 재고 상태(ADU, 예상 소진일 포함)를 계산하여 반환합니다.
+    이 함수가 재고 상태 계산의 유일한 소스 역할을 합니다 (Single Source of Truth).
+    """
+    cursor = conn.cursor(dictionary=True)
+    sql_query = """
+    WITH DailyUsage AS (
+        SELECT
+            item_id,
+            SUM(ABS(ea_qty)) / 90 AS adu
+        FROM transactions
+        WHERE transaction_type IN ('출고', '폐기') AND transaction_date >= DATE_SUB(NOW(), INTERVAL 90 DAY)
+        GROUP BY item_id
+    )
+    SELECT
+        i.item_id, i.item_name, i.category, i.current_stock_ea,
+        IFNULL(du.adu, 0) AS adu
+    FROM items i
+    LEFT JOIN DailyUsage du ON i.item_id = du.item_id
+    ORDER BY i.item_name ASC;
+    """
+    cursor.execute(sql_query)
+    items = cursor.fetchall()
+    cursor.close()
+
+    inventory_status_list = []
+    for item in items:
+        adu = item['adu']
+        current_stock = item['current_stock_ea']
+        days_left = current_stock / adu if adu and adu > 0 else None
+        status = get_status_by_days_left(days_left)
+        
+        inventory_status_list.append({
+            "item_id": item['item_id'],
+            "item_name": item['item_name'],
+            "category": item['category'],
+            "current_stock_ea": int(current_stock),
+            "adu": round(adu, 2) if adu is not None else 0,
+            "days_left": round(days_left, 1) if days_left is not None else None,
+            "status": status
+        })
+    return inventory_status_list
+
+def _get_nearing_expiry_batches(conn, threshold_days: int) -> List[Dict[str, Any]]:
+    """
+    [헬퍼] 지정된 기간 내에 유통기한이 만료되는 모든 '배치' 목록을 반환합니다.
+    """
+    cursor = conn.cursor(dictionary=True)
+    expiry_sql = """
+        SELECT
+            i.item_id, i.item_name, b.batch_id, b.expiry_date, b.current_batch_ea
+        FROM inventory_batches b
+        JOIN items i ON b.item_id = i.item_id
+        WHERE b.expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL %s DAY)
+        AND b.current_batch_ea > 0
+        ORDER BY b.expiry_date ASC, i.item_name ASC;
+    """
+    cursor.execute(expiry_sql, (threshold_days,))
+    expiry_details = cursor.fetchall()
+    cursor.close()
+
+    for item in expiry_details:
+        if isinstance(item.get('expiry_date'), datetime.date):
+            item['expiry_date'] = item['expiry_date'].strftime('%Y-%m-%d')
+    return expiry_details
+
+# =================================================================
+# 🏥 API 엔드포인트 (Endpoints)
+# =================================================================
+
 inventory_api = Blueprint('inventory_api', __name__)
 
-@inventory_api.route('/items/<item_id>/usage', methods=['GET'])
-def get_monthly_usage_data(item_id):
+@inventory_api.route('/inventory/status', methods=['GET'])
+def get_inventory_status_list():
     """
-    특정 품목의 최근 12개월간 월별 사용량(출고량) 데이터를 반환합니다.
+    [수정] 모든 품목의 현재 재고 상태 목록을 중앙 헬퍼 함수를 통해 반환합니다.
+    """
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"message": "Database connection error"}), 500
+    try:
+        status_list = _get_full_inventory_status(conn)
+        return jsonify(status_list)
+    except Exception as e:
+        return jsonify({"message": f"재고 현황 조회 중 오류 발생: {str(e)}"}), 500
+    finally:
+        if conn and conn.is_connected():
+            conn.close()
+
+@inventory_api.route('/alerts/summary', methods=['GET'])
+def get_alerts_summary():
+    """
+    [수정] 재고 부족 및 유통기한 임박 품목의 '개수'를 중앙 헬퍼 함수를 통해 요약하여 반환합니다.
+    """
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"message": "Database connection error"}), 500
+    
+    try:
+        # 1. 재고 부족 품목 개수 계산
+        full_status = _get_full_inventory_status(conn)
+        low_stock_count = sum(1 for item in full_status if item['status'] in ['위험', '경고'])
+
+        # 2. 유통기한 임박 품목 개수 계산
+        expiry_batches = _get_nearing_expiry_batches(conn, 30)
+        nearing_expiry_count = len(set(item['item_id'] for item in expiry_batches)) # 품목 ID 기준 중복 제거
+
+        return jsonify({
+            "low_stock_item_count": low_stock_count,
+            "nearing_expiry_item_count": nearing_expiry_count
+        })
+    except Exception as e:
+        return jsonify({"message": f"알림 요약 정보를 가져오는 중 오류가 발생했습니다: {str(e)}"}), 500
+    finally:
+        if conn and conn.is_connected():
+            conn.close()
+
+@inventory_api.route('/alerts/details', methods=['GET'])
+def get_alerts_details():
+    """
+    [수정] 재고 부족 및 유통기한 임박 품목의 '상세' 목록을 중앙 헬퍼 함수를 통해 반환합니다.
+    """
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"message": "Database connection error"}), 500
+
+    try:
+        # 1. 상세 재고 부족 목록 (헬퍼 함수 호출 후 필터링)
+        full_status = _get_full_inventory_status(conn)
+        low_stock_details = [item for item in full_status if item['status'] in ['위험', '경고']]
+        low_stock_details.sort(key=lambda x: (x['status'] == '경고', x['days_left'] if x['days_left'] is not None else float('inf')))
+
+        # 2. 상세 유통기한 임박 목록 (헬퍼 함수 직접 호출)
+        expiry_details = _get_nearing_expiry_batches(conn, 30)
+
+        return jsonify({
+            "expiry_alert_details": expiry_details,
+            "low_stock_alert_details": low_stock_details
+        })
+    except Exception as e:
+        return jsonify({"message": f"상세 알림 조회 중 오류가 발생했습니다: {str(e)}"}), 500
+    finally:
+        if conn and conn.is_connected():
+            conn.close()
+
+
+@inventory_api.route('/reports/summary-json', methods=['GET'])
+def get_report_summary_json():
+    """
+    [수정] 핵심 지표를 중앙 헬퍼 함수 등을 통해 일관된 방식으로 계산합니다.
     """
     conn = get_db_connection()
     if not conn:
         return jsonify({"message": "Database connection error"}), 500
     
     cursor = conn.cursor(dictionary=True)
-
     try:
-        sql_query = """
-        SELECT
-            DATE_FORMAT(transaction_date, '%%Y-%%m') AS month_label,
-            SUM(ABS(ea_qty)) AS total_usage_ea
-        FROM
-            transactions
-        WHERE
-            item_id = %s
-            AND transaction_type = '출고'
-            AND transaction_date >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
-        GROUP BY
-            month_label
-        ORDER BY
-            month_label ASC;
-        """
+        # 1. 총 사용량 (지난 30일)
+        cursor.execute("""
+            SELECT SUM(ABS(ea_qty)) as total_usage FROM transactions
+            WHERE transaction_type IN ('출고', '폐기') 
+            AND transaction_date >= DATE_SUB(NOW(), INTERVAL 30 DAY);
+        """)
+        total_usage = (cursor.fetchone()['total_usage'] or 0)
+
+        # 2. 헬퍼 함수를 통해 재고 부족 및 유통기한 임박 품목 개수 가져오기
+        full_status = _get_full_inventory_status(conn)
+        low_stock_count = sum(1 for item in full_status if item['status'] == '위험')
+        total_items = len(full_status)
         
-        cursor.execute(sql_query, (item_id,))
-        results = cursor.fetchall()
-        
-        if not results:
-            return jsonify({
-                "item_id": item_id,
-                "message": "No usage data found for the last 12 months.",
-                "data": []
-            }), 404
+        expiry_batches = _get_nearing_expiry_batches(conn, 30)
+        nearing_expiry_count = len(set(item['item_id'] for item in expiry_batches))
 
-        data = [
-            {"month": row['month_label'], "usage_ea": int(row['total_usage_ea'])}
-            for row in results
-        ]
+        # 3. 재고 건전성 점수 계산
+        healthy_items = total_items - low_stock_count
+        health_score = round((healthy_items / total_items) * 100, 1) if total_items > 0 else 100
 
-        return jsonify({"item_id": item_id, "data": data})
-
-    except mysql.connector.Error as err:
-        print(f"SQL Error during usage query: {err}")
-        return jsonify({"message": f"Database query failed: {err.msg}"}), 500
+        return jsonify({
+            "total_usage_last_month": int(total_usage),
+            "nearing_expiry_item_count": nearing_expiry_count,
+            "low_stock_item_count": low_stock_count,
+            "inventory_health_score": health_score
+        })
+    except Exception as e:
+        return jsonify({"message": f"요약 리포트 생성 중 오류가 발생했습니다: {str(e)}"}), 500
     finally:
         cursor.close()
-        conn.close()
+        if conn and conn.is_connected():
+            conn.close()
 
 
 @inventory_api.route('/items/<item_id>/stock-history', methods=['GET'])
 def get_stock_history(item_id):
-    """
-    특정 품목의 재고 변동량 데이터를 반환합니다.
-    """
+    # 이 함수는 특정 item_id에만 국한되므로 독립적으로 유지
     conn = get_db_connection()
-    if not conn:
-        return jsonify({"message": "Database connection error"}), 500
-
+    if not conn: return jsonify({"message": "Database connection error"}), 500
     cursor = conn.cursor(dictionary=True)
-
     try:
-        sql_query = """
-        SELECT
-            transaction_date,
-            ea_qty,
-            SUM(ea_qty) OVER (ORDER BY transaction_date ASC) AS cumulative_stock
-        FROM
-            transactions
-        WHERE
-            item_id = %s
-        ORDER BY
-            transaction_date ASC;
-        """
-        
+        sql_query = "SELECT transaction_date, ea_qty, SUM(ea_qty) OVER (ORDER BY transaction_date ASC) AS cumulative_stock FROM transactions WHERE item_id = %s ORDER BY transaction_date ASC;"
         cursor.execute(sql_query, (item_id,))
         results = cursor.fetchall()
-
-        if not results:
-            return jsonify({
-                "item_id": item_id,
-                "message": "No transaction history found.",
-                "data": []
-            }), 404
-
-        data = [
-            {
-                "date": row['transaction_date'].strftime('%Y-%m-%d %H:%M:%S'),
-                "ea_qty": int(row['ea_qty']),
-                "cumulative_stock": int(row['cumulative_stock'])
-            }
-            for row in results
-        ]
-
+        if not results: return jsonify({"item_id": item_id, "message": "No transaction history found", "data": []}), 404
+        data = [{"date": r['transaction_date'].strftime('%Y-%m-%d %H:%M:%S'), "ea_qty": int(r['ea_qty']), "cumulative_stock": int(r['cumulative_stock'])} for r in results]
         return jsonify({"item_id": item_id, "data": data})
+    except Exception as e:
+        return jsonify({"message": f"Database query failed: {str(e)}"}), 500
+    finally:
+        cursor.close()
+        conn.close()
 
-    except mysql.connector.Error as err:
-        print(f"SQL Error during stock history query: {err}")
-        return jsonify({"message": f"Database query failed: {err.msg}"}), 500
+@inventory_api.route('/items/<item_id>/details', methods=['GET'])
+def get_item_details(item_id):
+    conn = get_db_connection()
+    if not conn: return jsonify({"message": "Database connection error"}), 500
+    cursor = conn.cursor(dictionary=True)
+    try:
+        # 1. 기본 정보 조회
+        cursor.execute("SELECT item_name, current_stock_ea, category FROM items WHERE item_id = %s;", (item_id,))
+        item_base_info = cursor.fetchone()
+        if not item_base_info: return jsonify({"message": f"Item with ID {item_id} not found."}), 404
+        
+        # 2. ADU 및 수요 예측
+        cursor.execute("SELECT SUM(ABS(ea_qty)) / 90 AS adu FROM transactions WHERE item_id = %s AND transaction_type IN ('출고', '폐기') AND transaction_date >= DATE_SUB(NOW(), INTERVAL 90 DAY);", (item_id,))
+        
+        # 🚨 오류 수정 부분: fetchone()을 한 번만 호출하고, 그 결과에서 안전하게 값을 추출합니다.
+        adu_result = cursor.fetchone()
+        
+        # adu_result가 None이 아니면서 'adu' 키가 존재할 경우 값을 사용하고, 아니면 0을 사용합니다.
+        # adu_result.get('adu')가 None일 수 있으므로 이를 다시 확인합니다.
+        adu = adu_result.get('adu') if adu_result else 0
+        adu = adu if adu is not None else 0 # MySQL SUM 결과가 NULL일 때 (None) 대비
+
+        predicted_demand = round(adu * 30)
+
+        # 3. 가장 빠른 유통기한
+        cursor.execute("SELECT MIN(expiry_date) as nearest_expiry FROM inventory_batches WHERE item_id = %s AND current_batch_ea > 0;", (item_id,))
+        nearest_expiry_result = cursor.fetchone()
+        
+        # nearest_expiry_result가 None이 아닌지 확인 후 strftime 호출
+        nearest_expiry_date = nearest_expiry_result['nearest_expiry'].strftime('%Y-%m-%d') if nearest_expiry_result and nearest_expiry_result['nearest_expiry'] else None
+        
+        response_data = {
+            "item_id": item_id, 
+            "item_name": item_base_info['item_name'], 
+            "category": item_base_info['category'],
+            "current_stock": int(item_base_info['current_stock_ea']), 
+            "next_month_predicted_demand": int(predicted_demand),
+            "nearest_expiry_date": nearest_expiry_date
+        }
+        return jsonify(response_data)
+        
+    except Exception as e:
+        return jsonify({"message": f"Database query failed: {str(e)}"}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+@inventory_api.route('/items/<item_id>/usage/5y', methods=['GET'])
+def get_item_usage_5y(item_id):
+    conn = get_db_connection()
+    if not conn: return jsonify({"message": "Database connection error"}), 500
+    cursor = conn.cursor(dictionary=True)
+    try:
+        # 🚨 5년 사용량 추이: DATE_FORMAT 대신 YEAR() 사용 (연도 정수 반환)
+        cursor.execute("SELECT YEAR(transaction_date) AS year, SUM(ABS(ea_qty)) AS total_usage FROM transactions WHERE item_id = %s AND transaction_type IN ('출고', '폐기') AND transaction_date >= DATE_SUB(NOW(), INTERVAL 5 YEAR) GROUP BY year ORDER BY year ASC;", (item_id,))
+        usage_trend_5y = cursor.fetchall()
+
+        response_data = {
+            "item_id": item_id,
+            "usage_trend_5y": [
+                # YEAR()는 정수를 반환하므로 str()로 변환하여 응답
+                {"year": str(r['year']), "usage": int(r['total_usage'])} 
+                for r in usage_trend_5y
+            ]
+        }
+        return jsonify(response_data)
+        
+    except Exception as e:
+        return jsonify({"message": f"Database query failed: {str(e)}"}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+@inventory_api.route('/items/<item_id>/usage/1y', methods=['GET'])
+def get_item_usage_1y(item_id):
+    conn = get_db_connection()
+    if not conn: return jsonify({"message": "Database connection error"}), 500
+    cursor = conn.cursor(dictionary=True)
+    try:
+        # 🚨 최종 수정 쿼리: CONCAT, YEAR, LPAD를 사용하여 DB에서 'YYYY-MM' 문자열 직접 생성
+        sql_query = """
+            SELECT 
+                CONCAT(YEAR(transaction_date), '-', LPAD(MONTH(transaction_date), 2, '0')) AS month, 
+                SUM(ABS(ea_qty)) AS total_usage 
+            FROM transactions 
+            WHERE 
+                item_id = %s 
+                AND transaction_type IN ('출고', '폐기') 
+                AND transaction_date >= DATE_SUB(NOW(), INTERVAL 12 MONTH) 
+            GROUP BY month 
+            ORDER BY month ASC;
+        """
+        cursor.execute(sql_query, (item_id,))
+        monthly_pattern_1y = cursor.fetchall()
+        
+        response_data = {
+            "item_id": item_id,
+            "monthly_usage_pattern_1y": [
+                # month 필드는 이미 'YYYY-MM' 문자열이므로, 안전하게 str()로만 변환
+                {"month": str(r['month']), "usage": int(r['total_usage'])} 
+                for r in monthly_pattern_1y
+            ]
+        }
+        return jsonify(response_data)
+        
+    except Exception as e:
+        return jsonify({"message": f"Database query failed: {str(e)}"}), 500
     finally:
         cursor.close()
         conn.close()
@@ -265,142 +486,92 @@ def record_outbound():
         cursor.close()
         conn.close()
 
-
-@inventory_api.route('/alerts/summary', methods=['GET'])
-def get_alerts_summary():
-    """
-    재고 부족 또는 유통기한 임박 품목에 대한 요약 정보를 반환합니다.
-    (재고 부족 품목에 'status' 필드 추가)
-    """
+@inventory_api.route('/graphs/monthly-io-summary', methods=['GET'])
+def get_monthly_io_summary_graph():
+    # 독립적인 그래프용 API이므로 유지
     conn = get_db_connection()
-    if not conn:
-        return jsonify({"message": "Database connection error"}), 500
-    
+    if not conn: return jsonify({"message": "Database connection error"}), 500
     cursor = conn.cursor(dictionary=True)
-    
-    stock_threshold_days = 14
-    expiry_threshold_days = 30
-
     try:
-        sql_low_stock = """
-        WITH DailyUsage AS (
-            SELECT
-                item_id,
-                SUM(ABS(ea_qty)) / 90 AS adu
-            FROM transactions
-            WHERE transaction_type = '출고' AND transaction_date >= DATE_SUB(NOW(), INTERVAL 90 DAY)
-            GROUP BY item_id
-        )
-        SELECT
-            i.item_id,
-            i.item_name,
-            i.current_stock_ea,
-            du.adu,
-            (i.current_stock_ea / du.adu) AS days_left
-        FROM items i
-        JOIN DailyUsage du ON i.item_id = du.item_id
-        WHERE (i.current_stock_ea / du.adu) < %s AND i.current_stock_ea > 0;
-        """
-        cursor.execute(sql_low_stock, (stock_threshold_days,))
-        low_stock_items_raw = cursor.fetchall()
-
-        low_stock_items = []
-        for item in low_stock_items_raw:
-            days_left = item['days_left']
-            item['status'] = get_status_by_days_left(days_left)
-            low_stock_items.append(item)
-
-        sql_nearing_expiry = """
-        SELECT
-            b.item_id,
-            i.item_name,
-            b.batch_id,
-            b.expiry_date,
-            b.current_batch_ea
-        FROM inventory_batches b
-        JOIN items i ON b.item_id = i.item_id
-        WHERE b.expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL %s DAY)
-        AND b.current_batch_ea > 0
-        ORDER BY b.expiry_date ASC;
-        """
-        cursor.execute(sql_nearing_expiry, (expiry_threshold_days,))
-        nearing_expiry_items = cursor.fetchall()
-
-        return jsonify({
-            "low_stock_alert": low_stock_items,
-            "expiry_alert": nearing_expiry_items
-        })
-
-    except mysql.connector.Error as err:
-        print(f"SQL Error during alert summary query: {err}")
-        return jsonify({"message": f"Database query failed: {err.msg}"}), 500
-    finally:
-        cursor.close()
-        conn.close()
-
-
-@inventory_api.route('/inventory/status', methods=['GET'])
-def get_inventory_status_list():
-    """
-    모든 품목의 현재 재고량과 일평균 사용량(ADU)을 기반으로 한
-    재고 상태('위험', '경고', '충분')가 포함된 전체 재고 목록을 반환합니다.
-    """
-    conn = get_db_connection()
-    if not conn:
-        return jsonify({"message": "Database connection error"}), 500
-    
-    cursor = conn.cursor(dictionary=True)
-    
-    try:
-        sql_query = """
-        WITH DailyUsage AS (
-            SELECT
-                item_id,
-                SUM(ABS(ea_qty)) / 90 AS adu
-            FROM transactions
-            WHERE transaction_type = '출고' AND transaction_date >= DATE_SUB(NOW(), INTERVAL 90 DAY)
-            GROUP BY item_id
-        )
-        SELECT
-            i.item_id,
-            i.item_name,
-            i.category,
-            i.current_stock_ea,
-            IFNULL(du.adu, 0) AS adu
-        FROM items i
-        LEFT JOIN DailyUsage du ON i.item_id = du.item_id
-        ORDER BY i.item_name ASC;
-        """
+        sql_query = "SELECT DATE_FORMAT(transaction_date, '%%Y-%%m-%%d') as date, SUM(CASE WHEN transaction_type = '입고' THEN ea_qty ELSE 0 END) as inbound, SUM(CASE WHEN transaction_type = '출고' THEN ABS(ea_qty) ELSE 0 END) as outbound, SUM(CASE WHEN transaction_type = '폐기' THEN ABS(ea_qty) ELSE 0 END) as disposal FROM transactions WHERE transaction_date >= DATE_SUB(NOW(), INTERVAL 30 DAY) GROUP BY date ORDER BY date ASC;"
         cursor.execute(sql_query)
-        items = cursor.fetchall()
-
-        inventory_status_list = []
-        for item in items:
-            adu = item['adu']
-            current_stock = item['current_stock_ea']
-            days_left = None
-            
-            if adu > 0:
-                days_left = current_stock / adu
-            
-            status = get_status_by_days_left(days_left)
-            
-            item_status = {
-                "item_id": item['item_id'],
-                "item_name": item['item_name'],
-                "category": item['category'],
-                "current_stock_ea": int(current_stock),
-                "adu": round(adu, 2),
-                "days_left": round(days_left, 1) if days_left is not None else None,
-                "status": status
-            }
-            inventory_status_list.append(item_status)
-
-        return jsonify(inventory_status_list)
-
-    except mysql.connector.Error as err:
-        print(f"SQL Error during inventory status query: {err}")
-        return jsonify({"message": f"Database query failed: {err.msg}"}), 500
+        graph_data = cursor.fetchall()
+        for row in graph_data:
+            row['inbound'] = int(row['inbound'])
+            row['outbound'] = int(row['outbound'])
+            row['disposal'] = int(row['disposal'])
+        return jsonify(graph_data)
+    except Exception as e:
+        return jsonify({"message": f"그래프 데이터 조회 중 오류 발생: {str(e)}"}), 500
     finally:
-        cursor.close()
-        conn.close()
+        if conn and conn.is_connected():
+            cursor.close()
+            conn.close()
+
+@inventory_api.route('/reports/detailed-monthly', methods=['GET'])
+def get_detailed_monthly_report():
+    """
+    [수정] AI 리포트 생성 시, 중앙 헬퍼 함수를 통해 일관된 데이터를 사용합니다.
+    """
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"message": "Database connection error"}), 500
+    
+    cursor = conn.cursor(dictionary=True)
+    try:
+        # 1. 내부 데이터 집계 (헬퍼 함수 사용)
+        full_status = _get_full_inventory_status(conn)
+        low_stock_alerts_for_report = [
+            {"item_name": item['item_name'], "current_stock": item['current_stock_ea'], "days_left": item['days_left']}
+            for item in full_status if item['status'] in ['위험', '경고']
+        ]
+        
+        expiry_alerts_for_report = _get_nearing_expiry_batches(conn, 30)
+
+        cursor.execute("""
+            SELECT item_name, SUM(ABS(ea_qty)) as qty FROM transactions t
+            JOIN items i ON t.item_id = i.item_id
+            WHERE t.transaction_type IN ('출고', '폐기') AND t.transaction_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            GROUP BY item_name ORDER BY qty DESC LIMIT 3;
+        """)
+        top_consumed_items = cursor.fetchall()
+
+        # 2. 외부 데이터 및 컨텍스트 정보
+        current_month = datetime.datetime.now().month
+        seasons = {3: "봄 (환절기)", 4: "봄 (환절기)", 5: "봄 (환절기)", 6: "여름", 7: "여름", 8: "여름", 9: "가을 (환절기)", 10: "가을 (환절기)", 11: "가을 (환절기)", 12: "겨울", 1: "겨울", 2: "겨울"}
+        current_season = seasons.get(current_month)
+
+        # 3. 강화된 프롬프트 엔지니어링
+        prompt = f"""
+        당신은 대한민국 소재 동네 이비인후과의 재고 관리를 돕는 AI 컨설턴트입니다.
+        아래 제공된 병원의 내부 재고 데이터를 분석하여 원장님을 위한 상세 분석 리포트를 작성해주세요.
+
+        **[분석 대상 데이터]**
+        1.  **병원 내부 데이터 (최근 30일):**
+            - 최다 소모 품목 Top 3: {top_consumed_items}
+            - 현재 재고 부족 알림 (7일 내 소진 예상): {low_stock_alerts_for_report}
+            - 현재 유통기한 임박 알림 (30일 내 만료): {expiry_alerts_for_report}
+        2.  **외부 보건 동향:**
+            - 현재 계절: {current_season}
+
+        **[리포트 작성 가이드]**
+        * **제목:** 월간 AI 재고 분석 리포트
+        * **분석 기간:** 최근 30일 ({datetime.date.today().strftime('%Y-%m-%d')} 기준)
+        * **1. 총평:** 재고 관리 성과와 현재 상황을 요약.
+        * **2. 외부 환경 분석 및 예측:** '현재 계절'을 기반으로 수요 급증 예상 품목 언급.
+        * **3. 내부 데이터 심층 분석:** '최다 소모 품목', '재고 부족', '유통기한 임박' 문제 해결을 위한 구체적 조치 제안.
+        * **4. 최종 권장 조치 (Action Items):** 즉시 발주해야 할 품목 목록과 이유를 명확하게 제시.
+        
+        - 전문가적이고 신뢰감 있는 어조로, 데이터를 근거로 명확하고 이해하기 쉽게 작성해주세요.
+        """
+
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content(prompt)
+        
+        return jsonify({"report_text": response.text})
+    except Exception as e:
+        return jsonify({"message": f"AI 리포트 생성 중 오류가 발생했습니다: {str(e)}"}), 500
+    finally:
+        if conn and conn.is_connected():
+            cursor.close()
+            conn.close()
