@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { stockIn, stockOut, getAlertsData, getAlertsSummary } from '../apis/data'; 
-import { ITEM_LIST } from '../utils/itemList'; // ⬅️ ITEM_LIST를 별도 파일에서 가져옴
+import { ITEM_LIST } from '../utils/itemList'; 
 
 // --- 상단 대시보드 카드들 (API 연동) ---
 const SummaryCards = () => {
@@ -169,16 +169,16 @@ const RealtimeInput = () => {
   return (
     <section className="bg-white rounded-xl shadow p-6">
       <h3 className="font-bold text-lg mb-4">실시간 재고 기록</h3>
-      <div className="flex border border-gray-300 rounded-lg p-1 bg-gray-100 w-min mb-4">
+      <div className="flex flex-nowrap border border-gray-300 rounded-lg p-0.5 bg-gray-100 w-max mb-4">
         <button
           onClick={() => { setInputType('in'); resetForm(); }}
-          className={`px-6 py-2 text-sm font-bold rounded-md ${inputType === 'in' ? 'bg-white shadow' : 'text-gray-600'}`}
+          className={`px-6 py-2 text-sm font-bold rounded-md whitespace-nowrap ${inputType === 'in' ? 'bg-white shadow' : 'text-gray-600'}`}
         >
           입고
         </button>
         <button
           onClick={() => { setInputType('out'); resetForm(); }}
-          className={`px-6 py-2 text-sm font-bold rounded-md ${inputType === 'out' ? 'bg-white shadow' : 'text-gray-600'}`}
+          className={`px-6 py-2 text-sm font-bold rounded-md whitespace-nowrap ${inputType === 'out' ? 'bg-white shadow' : 'text-gray-600'}`}
         >
           출고
         </button>
@@ -250,7 +250,8 @@ const RealtimeInput = () => {
         <div className="flex justify-end mt-4">
             <button 
               type="submit"
-              className="w-full sm:w-1/3 md:w-1/4 bg-slate-800 text-white font-bold py-2.5 rounded-lg hover:bg-slate-900 transition-colors disabled:bg-gray-400"
+              className="w-full sm:w-1/3 md:w-1/4 text-white font-bold py-2.5 rounded-lg hover:bg-slate-900 transition-colors disabled:bg-gray-400"
+  style={{ backgroundColor: '#2F6F59' }} 
               disabled={loading || !formData.itemId}
             >
               {loading ? '처리 중...' : '기록'}
@@ -277,22 +278,24 @@ const AlertList = () => {
         const expiry = data.expiry_alert_details || [];
 
         const combinedAlerts = [
+          // 재고 부족 알림: days_left 사용, 유통기한은 없으면 null 처리
           ...(lowStock.map(item => ({
             item_id: item.item_id,
             item_name: item.item_name,
-            current_stock: item.current_stock_ea,
-            days_left: parseFloat(item.days_left), 
+            current_stock: Number(item.current_stock_ea || 0), // 값이 없으면 0으로 처리
+            days_left: item.days_left != null ? parseFloat(item.days_left) : null, // 값이 없으면 null
             status: '부족',
-            nearest_expiry_date: 'N/A', 
+            nearest_expiry_date: item.nearest_expiry_date || null, // 값이 없으면 null
             id: `low-${item.item_id}-${item.days_left}`, 
           }))),
+          // 기한 임박 알림: 유통기한 사용, days_left는 null 처리
           ...(expiry.map(item => ({
             item_id: item.item_id,
             item_name: item.item_name,
-            current_stock: item.current_batch_ea,
-            days_left: null,
+            current_stock: Number(item.current_batch_ea || 0), // 값이 없으면 0으로 처리
+            days_left: null, // 예상 소진일 정보 없음
             status: '임박',
-            nearest_expiry_date: item.expiry_date,
+            nearest_expiry_date: item.expiry_date || null, // 값이 없으면 null
             id: `exp-${item.item_id}-${item.expiry_date}`,
           }))),
         ];
@@ -343,12 +346,13 @@ const AlertList = () => {
                   </span>
                   {item.item_name}
                 </td>
-                <td className="px-6 py-4">{item.current_stock} EA</td>
+                <td className="px-6 py-4">{item.current_stock.toLocaleString()} EA</td>
                 <td className={`px-6 py-4 font-bold ${item.status === '부족' ? 'text-red-600' : ''}`}>
-                    {item.days_left !== null ? `${Math.floor(item.days_left)}일 후 (${item.days_left.toFixed(1)})` : 'N/A'}
+                    {/* days_left가 있으면 일수로 표시, 아니면 '-' */}
+                    {item.days_left !== null ? `${Math.floor(item.days_left)}일 후 (${item.days_left.toFixed(1)})` : '-'}
                 </td>
                 <td className={`px-6 py-4 font-bold ${item.status === '임박' ? 'text-yellow-600' : ''}`}>
-                    {item.nearest_expiry_date}
+                    {item.nearest_expiry_date || '-'}
                 </td>
                 <td className="px-6 py-4 text-right">
                   <Link to={`/detail/${item.item_id}`} className="font-bold text-blue-600 hover:underline">

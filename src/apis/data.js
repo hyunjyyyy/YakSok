@@ -2,7 +2,7 @@ import axios from 'axios';
 
 
 const BASE =
-  import.meta.env.VITE_API_URL_BASE || 'https://fcc0b7ff67e7.ngrok-free.app';
+  import.meta.env.VITE_API_URL_BASE || 'https://b07590104546.ngrok-free.app';
 
 // API 호출 시 사용할 공통 헤더
 const headers = { 'ngrok-skip-browser-warning': 'true' };

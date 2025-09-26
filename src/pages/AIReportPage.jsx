@@ -8,9 +8,10 @@ import axios from 'axios';
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
 // API BASE 정의
-const NGROK_FALLBACK_URL = 'https://fcc0b7ff67e7.ngrok-free.app';
+const NGROK_FALLBACK_URL = 'https://b07590104546.ngrok-free.app';
 const API_BASE = import.meta.env.VITE_API_URL_BASE || NGROK_FALLBACK_URL;
-const API_BASE_CLEAN = API_BASE.replace(/\/$/, '');
+// 안전한 방법: 문자열 메서드를 사용하여 끝의 슬래시를 제거
+const API_BASE_CLEAN = API_BASE.endsWith('/') ? API_BASE.slice(0, -1) : API_BASE;
 const NGROK_HEADER = { 'ngrok-skip-browser-warning': 'true' };
 
 // API 엔드포인트 정의
@@ -18,6 +19,7 @@ const endpoints = {
     summary: () => `${API_BASE_CLEAN}/api/reports/summary-json`,
     detail: () => `${API_BASE_CLEAN}/api/reports/detailed-monthly`,
     graph: () => `${API_BASE_CLEAN}/api/reports/monthly-io-summary`,
+    disposal: () => `${API_BASE_CLEAN}/api/reports/high-disposal-items`, // 폐기율 데이터 경로
 };
 
 // --- 아이콘 컴포넌트들 ---
@@ -69,10 +71,13 @@ const UsageChart = ({ graphData }) => {
 
 const AIReportPage = () => {
     const [isDetailVisible, setIsDetailVisible] = useState(false);
+    const reportRef = useRef(null); 
+    
     const [reportData, setReportData] = useState({
         summary: null,
         detail: null,
         graph: null,
+        disposalItems: null,
         loading: true,
         error: null,
     });
@@ -81,10 +86,12 @@ const AIReportPage = () => {
     useEffect(() => {
         const fetchReportData = async () => {
             try {
-                const [summaryRes, detailRes, graphRes] = await Promise.all([
+                // 🚨 API 호출에 새로운 'disposal' 엔드포인트 추가
+                const [summaryRes, detailRes, graphRes, disposalRes] = await Promise.all([
                     axios.get(endpoints.summary(), { headers: NGROK_HEADER }),
                     axios.get(endpoints.detail(), { headers: NGROK_HEADER }),
                     axios.get(endpoints.graph(), { headers: NGROK_HEADER }),
+                    axios.get(endpoints.disposal(), { headers: NGROK_HEADER }), 
                 ]);
 
                 const graphData = graphRes.data?.data || graphRes.data || []; 
@@ -93,6 +100,7 @@ const AIReportPage = () => {
                     summary: summaryRes.data || {},
                     detail: detailRes.data || {},
                     graph: Array.isArray(graphData) ? graphData : [],
+                    disposalItems: disposalRes.data || [], // 폐기율 데이터 저장
                     loading: false,
                     error: null,
                 });
@@ -119,7 +127,13 @@ const AIReportPage = () => {
     // 데이터 변수 준비
     const summary = reportData.summary || {};
     const detailText = reportData.detail?.report_text || "리포트 상세 분석 텍스트가 없습니다.";
+    const disposalItems = reportData.disposalItems || []; 
     
+    // PDF 다운로드 핸들러 (비활성화 상태 유지)
+    const handleDownloadPDF = () => {
+        alert("PDF 다운로드 기능은 현재 비활성화되어 있습니다.");
+    };
+
     return (
         <main className="bg-slate-50 p-4 sm:p-6 md:p-8 space-y-8">
             
@@ -159,7 +173,8 @@ const AIReportPage = () => {
                       <h3 className="flex items-center text-lg font-bold text-gray-800"><RobotIcon /> AI 분석 및 권장 조치</h3>
                       {/* 리포트 텍스트 (report_text) 출력 */}
                       <div className="mt-4 text-gray-700 space-y-3 whitespace-pre-wrap">
-                          {detailText}
+                          {/* 일반 텍스트로 렌더링 */}
+                          <div style={{ whiteSpace: 'pre-wrap' }}>{detailText}</div>
                       </div>
                   </div>
                   
@@ -178,21 +193,36 @@ const AIReportPage = () => {
                               <div>
                                   <h4 className="font-bold text-md mb-2">총 입/출고 및 폐기 추세</h4>
                                   <div style={{ height: '350px' }}>
-                                      {/* 그래프 데이터 전달 */}
                                       <UsageChart graphData={reportData.graph} />
                                   </div>
                               </div>
-                              {/* 품목별 회전율 테이블은 목업 데이터로 유지 */}
+                              
+                              {/* 🚨 수정: 품목별 회전율 테이블에 API 데이터 반영 */}
                               <div>
                                   <h4 className="font-bold text-md mb-2">품목별 회전율 / 폐기율</h4>
                                   <div className="overflow-x-auto">
                                       <table className="w-full text-sm text-left">
                                           <thead className="text-xs text-gray-700 uppercase bg-gray-50">
-                                              <tr><th className="px-6 py-3">품목명</th><th className="px-6 py-3">재고 회전율</th><th className="px-6 py-3">폐기율</th></tr>
+                                              <tr>
+                                                <th className="px-6 py-3">품목명</th>
+                                                <th className="px-6 py-3">재고 회전율</th>
+                                                <th className="px-6 py-3">폐기율</th>
+                                                <th className="px-6 py-3">재고 수량 (EA)</th>
+                                              </tr>
                                           </thead>
                                           <tbody>
-                                              <tr className="border-t"><td className="px-6 py-4 font-bold">주사기</td><td className="px-6 py-4">4.5회/년</td><td className="px-6 py-4 text-red-600 font-bold">5.2%</td></tr>
-                                              <tr className="border-t"><td className="px-6 py-4 font-bold">거즈</td><td className="px-6 py-4">8.2회/년</td><td className="px-6 py-4">1.1%</td></tr>
+                                              {disposalItems.map((item) => (
+                                                <tr key={item.item_id} className="border-t">
+                                                    <td className="px-6 py-4 font-bold">{item.item_name}</td>
+                                                    {/* 🚨 수정: Number()를 사용하여 toFixed 오류 해결 */}
+                                                    <td className="px-6 py-4">{Number(item.inventory_turnover_rate).toFixed(2) || 'N/A'}회/년</td>
+                                                    <td className={`px-6 py-4 font-bold ${Number(item.disposal_rate) > 10 ? 'text-red-600' : 'text-gray-800'}`}>
+                                                        {/* 🚨 수정: Number()를 사용하여 toFixed 오류 해결 */}
+                                                        {Number(item.disposal_rate).toFixed(2) || 0}%
+                                                    </td>
+                                                    <td className="px-6 py-4">{item.current_stock_ea?.toLocaleString() || 0}</td>
+                                                </tr>
+                                              ))}
                                           </tbody>
                                       </table>
                                   </div>
@@ -206,12 +236,15 @@ const AIReportPage = () => {
             {/* 3. 버튼 (최하단 배치) */}
             <div className="flex space-x-4">
                 <button 
-                    disabled={true} // PDF 기능 제거로 인해 버튼 비활성화
+                    disabled={true} 
                     className="flex-1 flex items-center justify-center bg-blue-600 text-white font-bold py-2.5 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-blue-400"
                 >
                     <DownloadIcon /> PDF 다운로드
                 </button>
-                <button className="flex-1 flex items-center justify-center bg-green-600 text-white font-bold py-2.5 rounded-lg hover:bg-green-700 transition-colors">
+                <button 
+                    onClick={() => window.print()}
+                    className="flex-1 flex items-center justify-center bg-green-600 text-white font-bold py-2.5 rounded-lg hover:bg-green-700 transition-colors"
+                >
                     <DownloadIcon /> 출력하기
                 </button>
             </div>

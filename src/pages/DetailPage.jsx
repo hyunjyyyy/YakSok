@@ -1,15 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useLocation, Link } from 'react-router-dom';
 import axios from 'axios';
-// BarChart, Bar 컴포넌트 임포트 유지
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts';
 
-/** API_BASE 정의 (data.js와 동일하게 절대 경로 사용) */
-const NGROK_FALLBACK_URL = 'https://fcc0b7ff67e7.ngrok-free.app';
+/** API_BASE 정의 */
+const NGROK_FALLBACK_URL = 'https://b07590104546.ngrok-free.app';
 const API_BASE = import.meta.env.VITE_API_URL_BASE || NGROK_FALLBACK_URL;
 const API_BASE_CLEAN = API_BASE.replace(/\/$/, ''); 
 
-// API 기본 접두사
 const API_PREFIX = '/api/items/';
 const NGROK_HEADER = { 'ngrok-skip-browser-warning': 'true' };
 
@@ -19,17 +17,40 @@ const endpoints = {
   usage5y: (id) => `${API_BASE_CLEAN}${API_PREFIX}${id}/usage/5y`,
 };
 
+// --- 재고 상태 문자열을 UI 스타일 객체로 매핑하는 함수 ---
+const mapInventoryStatusToStyle = (rawStatus) => {
+  const map = {
+    '위험': { label: '❌ 위험', style: 'bg-red-100 text-red-800' },
+    '경고': { label: '⚠️ 경고', style: 'bg-yellow-100 text-yellow-800' },
+    '충분': { label: '✅ 충분', style: 'bg-green-100 text-green-800' },
+    '조회 중': { label: '조회 중', style: 'bg-gray-200 text-gray-700' }, 
+    '상태 오류': { label: '상태 오류', style: 'bg-red-100 text-red-700' }, 
+  };
+  // rawStatus가 null이거나 정의되지 않은 경우 '조회 중'으로 폴백 처리
+  return map[rawStatus] || map['조회 중'];
+};
+
 /** 서버 응답 → UI 데이터 정규화 */
 const normalizeDetail = (d, urlItemId, usage1y, usage5y) => {
   if (!d) return null;
+    
+  const currentStock = Number(d.current_stock ?? 0);
+  const predictedNextMonth = Number(d.next_month_predicted_demand ?? 0);
+    
+  // 🚨 수정 반영: d.status 필드를 사용하여 재고 상태를 가져옴
+  const apiStatus = d.status || '조회 중'; 
+  const inventoryStatus = mapInventoryStatusToStyle(apiStatus);
+    
   return {
     id: d.item_id || urlItemId, 
     name: d.item_name || '이름 없음', 
     category: d.category || '카테고리 없음',
     
-    currentStock: Number(d.current_stock ?? 0),
-    predictedNextMonth: Number(d.next_month_predicted_demand ?? 0),
+    currentStock: currentStock,
+    predictedNextMonth: predictedNextMonth,
     nearestExpiry: d.nearest_expiry_date ?? '-',
+    
+    inventoryStatus: inventoryStatus, 
     
     pattern1y: Array.isArray(usage1y.monthly_usage_pattern_1y) ? usage1y.monthly_usage_pattern_1y : [],
     trend5y: Array.isArray(usage5y.usage_trend_5y) ? usage5y.usage_trend_5y : [],
@@ -56,7 +77,7 @@ const ChartComponent = ({ title, data, dataKey, xKey, barName, isYearly }) => {
     const tooltipLabelFormatter = (label) => isYearly ? `${label}년` : `${label.split('-').pop()}월`;
 
     const ChartType = isYearly ? BarChart : LineChart;
-    const VisualizationElement = isYearly ? Bar : Line; // recharts의 Bar/Line 컴포넌트 사용
+    const VisualizationElement = isYearly ? Bar : Line;
     const strokeColor = isYearly ? '#2F6F59' : '#2F6F59';
 
     return (
@@ -65,8 +86,8 @@ const ChartComponent = ({ title, data, dataKey, xKey, barName, isYearly }) => {
                 <ResponsiveContainer width="100%" height="100%">
                     <ChartType
                         data={data}
-                        margin={{ top: 15, right: 30, left: 10, bottom: 5 }}
-                        barCategoryGap={isYearly ? '80%' : undefined} 
+                        margin={{ top: 30, right: 30, left: 10, bottom: 5 }} 
+                        barCategoryGap={isYearly ? '20%' : undefined} 
                         barGap={isYearly ? 4 : undefined} 
                     >
                         <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -94,7 +115,7 @@ const ChartComponent = ({ title, data, dataKey, xKey, barName, isYearly }) => {
                             activeDot={{ r: 8 }} 
                             name={barName} 
                             strokeWidth={2} 
-                            maxBarSize={isYearly ? 50 : undefined} // 🚨 막대의 최대 너비를 50px로 고정
+                            maxBarSize={isYearly ? 50 : undefined} 
                         />
                     </ChartType>
                 </ResponsiveContainer>
@@ -104,7 +125,6 @@ const ChartComponent = ({ title, data, dataKey, xKey, barName, isYearly }) => {
 };
 
 // --- 유틸리티 컴포넌트 ---
-// 🚨 이름 변경: Bar -> BarVisualization (Recharts Bar와 충돌 방지)
 const BarVisualization = ({ value, max, label, subLabel }) => {
   const width = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
   return (
@@ -154,24 +174,13 @@ const DetailPage = () => {
           nearestExpiry: fromList.expiry ?? '-',
           trend5y: [],
           pattern1y: [],
+          inventoryStatus: mapInventoryStatusToStyle('조회 중'), 
         }
       : null
   );
   const [loading, setLoading] = useState(!fromList);
   const [error, setError] = useState(null);
   
-  const inventoryStatus = useMemo(() => {
-    if (loading || error || item?.predictedNextMonth == null) return { label: '조회 중', color: 'bg-gray-200', text: 'text-gray-700' };
-    const stock = item.currentStock;
-    const demand = item.predictedNextMonth;
-
-    if (stock === 0) return { label: '❌ 재고 없음', color: 'bg-red-100', text: 'text-red-700' };
-    if (demand > 0 && stock < demand) return { label: '❌ 부족', color: 'bg-red-100', text: 'text-red-700' };
-    if (demand > 0 && stock < demand * 2) return { label: '⚠️ 주의', color: 'bg-yellow-100', text: 'text-yellow-700' };
-    
-    return { label: '✅ 충분', color: 'bg-emerald-100', text: 'text-emerald-700' };
-  }, [item, loading, error]);
-
   const expiryDateClass = useMemo(() => {
     if (!item?.nearestExpiry || item.nearestExpiry === '-') return 'font-bold text-gray-700';
     const expiryDate = new Date(item.nearestExpiry);
@@ -218,6 +227,11 @@ const DetailPage = () => {
             if (!fromList) {
                 setError(e?.message || '상세 데이터를 불러오지 못했습니다.');
             } else {
+                // API 호출 실패 시 '상태 오류'로 변경
+                setItem(prev => ({ 
+                    ...prev, 
+                    inventoryStatus: mapInventoryStatusToStyle('상태 오류') 
+                }));
                 setError('API 호출에 문제가 발생했으나, 기본 정보는 표시합니다.');
             }
         }
@@ -258,8 +272,9 @@ const DetailPage = () => {
         <Card
           title="✅ 핵심 지표"
           right={
-            <span className={`text-xs px-2 py-1 rounded-full ${inventoryStatus.color} ${inventoryStatus.text} font-bold`}>
-              {inventoryStatus.label}
+            // item.inventoryStatus를 직접 사용
+            <span className={`text-xs px-2 py-1 rounded-full ${item.inventoryStatus.style} font-bold`}>
+              {item.inventoryStatus.label}
             </span>
           }
         >
@@ -287,7 +302,7 @@ const DetailPage = () => {
               {item.predictedNextMonth != null
                 ? `현재 재고 대비 다음 달 수요 ${item.predictedNextMonth.toLocaleString()} EA 고려 `
                 : '현재 재고 및 사용 패턴 고려 '}
-              {item.predictedNextMonth != null && item.currentStock < item.predictedNextMonth
+              {item.inventoryStatus.label === '❌ 위험' 
                 ? '→ 추가 발주 필요 가능성'
                 : '→ 당분간 재고 여유 있음'}
             </li>
@@ -306,7 +321,7 @@ const DetailPage = () => {
               dataKey="usage"
               xKey="year" 
               barName="연간 사용량"
-              isYearly={true} // Bar Chart 렌더링
+              isYearly={true}
           />
 
           {/* 1년 월별 사용 패턴 (꺾은선 그래프) */}
@@ -316,7 +331,7 @@ const DetailPage = () => {
               dataKey="usage"
               xKey="month" 
               barName="월별 사용량"
-              isYearly={false} // Line Chart 렌더링
+              isYearly={false}
           />
       </section>
     </main>

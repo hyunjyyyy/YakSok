@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { getInventoryData } from '../apis/data';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://fcc0b7ff67e7.ngrok-free.app/api/inventory/status';
+const API_URL = import.meta.env.VITE_API_URL || 'https://b07590104546.ngrok-free.app/api/inventory/status';
 
 const SortIcon = () => (
   <svg className="h-4 w-4 inline-block ml-1 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
@@ -150,7 +150,7 @@ const InventoryListPage = () => {
             <label htmlFor="search" className="block text-sm font-medium text-gray-700">검색</label>
             <input
               id="search"
-              placeholder="품목명 또는 코드로 검색..."
+              placeholder="  품목명 또는 코드로 검색..."
               className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
               onChange={(e) => setSearchTerm(e.target.value)}
             />
