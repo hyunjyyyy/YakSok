@@ -3,9 +3,8 @@ import DashboardLayout from './components/layout/DashboardLayout';
 import MainDashboard from './pages/MainDashboard';
 import InventoryListPage from './pages/InventoryListPage';
 import MapPage from './pages/MapPage';
-// import DetailPage from './pages/DetailPage';
-// <Route path="/detail/:itemId" element={<DetailPage />} />
-
+import AIReportPage from './pages/AIReportPage';
+import DetailPage from './pages/DetailPage';
 import GlobalStyle from './styles/GlobalStyle';
 
 function App() {
@@ -20,6 +19,8 @@ function App() {
           <Route element={<DashboardLayout />}>
             <Route path="/" element={<MainDashboard />} />
             <Route path="/inventory" element={<InventoryListPage />} />
+            <Route path="/ai-report" element={<AIReportPage />} />
+            <Route path="/detail/:itemId" element={<DetailPage />} />
             <Route path="/map" element={<MapPage />} />
           </Route>
         </Routes>
