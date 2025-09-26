@@ -6,6 +6,9 @@ import AIReportPage from './pages/AIReportPage';
 import DetailPage from './pages/DetailPage';
 import GlobalStyle from './styles/GlobalStyle';
 
+import MapPage from './pages/MapPage';
+
+
 function App() {
   return (
     <>
@@ -20,6 +23,7 @@ function App() {
             <Route path="/inventory" element={<InventoryListPage />} />
             <Route path="/ai-report" element={<AIReportPage />} />
             <Route path="/detail/:itemId" element={<DetailPage />} />
+            <Route path="/map" element={<MapPage />} />
           </Route>
         </Routes>
       </BrowserRouter>
