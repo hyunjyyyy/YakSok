@@ -126,19 +126,51 @@ const DashboardLayout = () => {
 
                 {/* 모달 */}
                 {report && (
-                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                        <div className="bg-white rounded-xl shadow-2xl w-[800px] max-h-[600px] overflow-auto relative p-6">
+                    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+                        <div className="bg-white rounded-2xl shadow-2xl w-[850px] max-h-[650px] overflow-auto relative p-8 border border-gray-200">
+
+                            {/* 닫기 버튼 */}
                             <button
                                 onClick={() => setReport(null)}
-                                className="absolute top-3 right-3 text-gray-500 hover:text-black text-xl font-bold"
+                                className="absolute top-5 right-5 text-gray-400 hover:text-gray-700 text-3xl font-bold transition-colors"
                             >
                                 ✕
                             </button>
-                            <h2 className="text-2xl font-bold mb-4">AI 리포트</h2>
-                            <pre className="text-sm whitespace-pre-wrap">{report.report_text}</pre>
+
+                            {/* 제목 */}
+                            <h2 className="text-3xl font-bold text-gray-800 mb-6">AI 리포트</h2>
+
+                            {/* 내용 영역 */}
+                            <div className="prose prose-sm md:prose-base text-gray-700">
+                                {/* report_text를 Markdown 스타일로 표시 */}
+                                {report.report_text.split('\n').map((line, idx) => {
+                                    line = line.trim();
+                                    if (!line) return <br key={idx} />;
+
+                                    // 제목 처리 (##, ### 등)
+                                    if (line.startsWith('### ')) {
+                                        return <h3 key={idx} className="text-lg font-semibold mt-4 mb-2">{line.replace('### ', '')}</h3>;
+                                    } else if (line.startsWith('## ')) {
+                                        return <h2 key={idx} className="text-xl font-bold mt-6 mb-3">{line.replace('## ', '')}</h2>;
+                                    } else if (line.startsWith('# ')) {
+                                        return <h1 key={idx} className="text-2xl font-extrabold mt-6 mb-3">{line.replace('# ', '')}</h1>;
+                                    }
+
+                                    // 강조 처리 (**) → 굵게
+                                    const parts = line.split(/\*\*(.+?)\*\*/g);
+                                    return (
+                                        <p key={idx} className="mb-2">
+                                            {parts.map((part, i) =>
+                                                i % 2 === 1 ? <strong key={i} className="font-semibold">{part}</strong> : part
+                                            )}
+                                        </p>
+                                    );
+                                })}
+                            </div>
                         </div>
                     </div>
                 )}
+
             </div>
         </div>
     );
