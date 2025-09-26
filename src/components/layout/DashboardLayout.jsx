@@ -1,30 +1,97 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
+// 🚨 logo 파일을 임포트하기 위한 가정 (원본 파일에 logo import가 있었습니다)
+import logo from "../../assets/logo.png"; 
+
+// Chart.js 관련 임포트 (AI 리포트 모달용)
+import { Bar, Pie } from 'react-chartjs-2';
+import {
+    Chart as ChartJS,
+    CategoryScale,
+    LinearScale,
+    BarElement,
+    Title,
+    Tooltip,
+    Legend,
+    ArcElement
+} from 'chart.js';
+
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);
+
 
 // --- 아이콘 컴포넌트들 ---
-const SearchIcon = () => <svg className="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" /></svg>;
-const ReportIcon = () => <svg className="h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9.75v6.75m0 0l-3-3m3 3l3-3m-8.25 6a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" /></svg>;
+const SearchIcon = () => (
+    <svg className="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+        <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+    </svg>
+);
+const ReportIcon = () => (
+    <svg className="h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9.75v6.75m0 0l-3-3m3 3l3-3m-8.25 6a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" />
+    </svg>
+);
 
-// --- 1. 헤더 영역  ---
-const Header = () => {
-    // 1. 검색창의 입력값을 저장하기 위한 state
+// --- 1. Header (CSV 업로드, 검색 기능 통합) ---
+// props로 setReport와 setLoading을 받도록 수정 (CSV 업로드 처리용)
+const Header = ({ setReport, setLoading }) => { 
     const [query, setQuery] = useState('');
-    // 2. 페이지 이동 기능을 사용하기 위한 navigate 함수
+    const fileInputRef = useRef(null);
     const navigate = useNavigate();
 
     const handleSearch = (e) => {
-        // 3. 'Enter' 키를 눌렀고, 검색어가 비어있지 않을 때만 실행
         if (e.key === 'Enter' && query.trim() !== '') {
-            // 4. 입력된 query 값(품목 ID)을 가지고 상세 페이지로 이동
             navigate(`/detail/${query.trim()}`);
-            // 5. 검색 후에는 검색창을 비워줍니다.
             setQuery('');
         }
     };
 
+    const handleCsvButtonClick = () => {
+        fileInputRef.current.click();
+    };
+
+    const handleFileChange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setLoading(true); // 로딩 시작
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            // API 경로는 환경 변수나 data.js에서 설정된 경로를 따라야 합니다.
+            // 여기서는 임시로 상대 경로를 사용합니다.
+            const res = await fetch('csv/reports/generate-from-csv', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!res.ok) {
+                const text = await res.text();
+                alert(`업로드 실패: ${text}`);
+                setLoading(false);
+                return;
+            }
+
+            const data = await res.json();
+            setReport(data); // 리포트 전달 -> 모달 렌더링
+        } catch (error) {
+            console.error(error);
+            alert('서버 요청 중 오류 발생');
+        } finally {
+            setLoading(false); // 로딩 종료
+        }
+    };
+
+
     return (
         <header className="bg-[#2F6F59] p-4 flex items-center justify-between sticky top-0 z-10">
-            <h1 className="text-2xl font-extrabold text-white">Yak-Sok</h1>
+            <div className="flex items-center">
+                {/* 🚨 로고와 타이틀 통합 */}
+                <img src={logo} alt="Yak-Sok Logo" className="w-12 h-12 mr-1" />
+                <h1 className="text-2xl font-extrabold text-white">Yak-Sok</h1>
+            </div>
+
             <div className="flex-1 max-w-xl mx-4">
                 <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><SearchIcon /></div>
@@ -32,43 +99,187 @@ const Header = () => {
                         type="text" 
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
-                        onKeyDown={handleSearch} // Enter 키 입력을 감지
+                        onKeyDown={handleSearch} 
                         placeholder="품목 ID로 검색 후 Enter..." 
                         className="w-full pl-10 pr-4 py-2 border rounded-lg bg-white/20 text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-white"
                     />
                 </div>
             </div>
-            <button className="bg-white/90 text-gray-800 font-bold px-4 py-2 rounded-lg hover:bg-white transition-colors flex items-center text-sm">
-                <ReportIcon /> CSV ➔ AI 리포트
-            </button>
+
+            <div className="relative">
+                {/* CSV 업로드 버튼 */}
+                <button
+                    onClick={handleCsvButtonClick}
+                    className="bg-white/90 text-gray-800 font-bold px-4 py-2 rounded-lg hover:bg-white transition-colors flex items-center text-sm"
+                >
+                    <ReportIcon /> CSV ➔ AI 리포트
+                </button>
+                {/* 숨겨진 파일 입력 필드 */}
+                <input
+                    type="file"
+                    accept=".csv"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    style={{ display: 'none' }}
+                />
+            </div>
         </header>
     );
 };
 
-// --- 2. 네비게이션 탭 ---
+// --- 2. Navigation (지도 경로 통합) ---
 const Navigation = () => {
     const location = useLocation();
     const pathname = location.pathname;
 
     return (
-        <nav className="flex space-x-2 px-4 border-b bg-white sticky top-[80px] z-10">
+        // 🚨 top-[64px] 또는 top-[80px]로 조정하여 헤더 높이에 맞춤
+        <nav className="flex space-x-2 px-4 border-b bg-white sticky top-[80px] z-10"> 
             <Link to="/" className={`px-3 py-3 font-bold text-sm ${pathname === '/' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-blue-600'}`}>대시보드</Link>
             <Link to="/inventory" className={`px-3 py-3 font-bold text-sm ${pathname === '/inventory' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-blue-600'}`}>재고 리스트</Link>
             <Link to="/ai-report" className={`px-3 py-3 font-bold text-sm ${pathname === '/ai-report' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-blue-600'}`}>AI 리포트</Link>
+            {/* 🚨 [fe-map] 지도 경로 통합 */}
+            <Link to="/map" className={`px-3 py-3 font-bold text-sm ${pathname === '/map' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-blue-600'}`}>재고 연계</Link> 
         </nav>
     );
 };
 
 
-// --- 최종 레이아웃 컴포넌트 ---
+// --- 3. DashboardLayout (로딩 및 리포트 모달 통합) ---
 const DashboardLayout = () => {
+    // 🚨 CSV 업로드 결과와 로딩 상태를 관리하는 State 추가
+    const [report, setReport] = useState(null); 
+    const [loading, setLoading] = useState(false);
+
     return (
         <div className="bg-white min-h-screen">
             <div className="max-w-7xl mx-auto">
-                <Header />
+                {/* Header에 State Setter 함수 전달 */}
+                <Header setReport={setReport} setLoading={setLoading} /> 
                 <Navigation />
-                {/* 이 자리에 각 페이지의 실제 내용이 렌더링됩니다. */}
                 <Outlet />
+
+                {/* 🚨 로딩 모달 (fe-map 또는 fe-setup에서 추가된 모달) */}
+                {loading && (
+                    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+                        <div className="bg-white rounded-2xl shadow-2xl w-[400px] p-8 flex flex-col items-center">
+                            <div className="w-16 h-16 border-8 border-t-8 border-gray-200 border-t-green-600 rounded-full animate-spin mb-4"></div>
+                            <p className="text-gray-700 font-semibold">AI 리포트 생성 중...</p>
+                        </div>
+                    </div>
+                )}
+
+                {/* 🚨 리포트 모달 (fe-map 또는 fe-setup에서 추가된 모달) */}
+                {report && !loading && (
+                    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+                        <div className="bg-white rounded-2xl shadow-2xl w-[850px] max-h-[650px] overflow-auto relative p-8 border border-gray-200">
+
+                            {/* 닫기 버튼 */}
+                            <button
+                                onClick={() => setReport(null)}
+                                className="absolute top-5 right-5 text-gray-400 hover:text-gray-700 text-3xl font-bold transition-colors"
+                            >
+                                ✕
+                            </button>
+
+                            {/* PDF 다운로드 버튼 */}
+                            <button
+                                className="absolute top-5 right-16 bg-[#2F6F59] text-white text-sm font-bold px-3 py-1.5 rounded-lg hover:opacity-90"
+                            >
+                                PDF 다운로드
+                            </button>
+
+                            <h2 className="text-3xl font-bold text-gray-800 mb-6">AI 리포트</h2>
+
+                            <div className="prose prose-sm md:prose-base text-gray-700 mb-6">
+                                {/* 🚨 리포트 텍스트 렌더링 로직 통합 */}
+                                {report.report_text.split('\n').map((line, idx) => {
+                                    line = line.trim();
+                                    if (!line) return <br key={idx} />;
+                                    if (line.startsWith('### ')) return <h3 key={idx} className="text-lg font-semibold mt-4 mb-2">{line.replace('### ', '')}</h3>;
+                                    if (line.startsWith('## ')) return <h2 key={idx} className="text-xl font-bold mt-6 mb-3">{line.replace('## ', '')}</h2>;
+                                    if (line.startsWith('# ')) return <h1 key={idx} className="text-2xl font-extrabold mt-6 mb-3">{line.replace('# ', '')}</h1>;
+                                    const parts = line.split(/\*\*(.+?)\*\*/g);
+                                    return (
+                                        <p key={idx} className="mb-2">
+                                            {parts.map((part, i) =>
+                                                i % 2 === 1 ? <strong key={i} className="font-semibold">{part}</strong> : part
+                                            )}
+                                        </p>
+                                    );
+                                })}
+                            </div>
+
+                            <div className="space-y-8">
+                                {/* 🚨 그래프 렌더링 로직 통합 (ChartJS 사용) */}
+                                {/* 품목별 소모량 Bar Chart */}
+                                {report.graphs?.by_item && (
+                                    <div className="w-full max-w-xl mx-auto">
+                                        <h3 className="text-lg font-bold mb-2">품목별 소모량</h3>
+                                        <Bar
+                                            data={{
+                                                labels: report.graphs.by_item.map(i => i.item_name),
+                                                datasets: [{
+                                                    label: '소모량',
+                                                    data: report.graphs.by_item.map(i => i.quantity),
+                                                    backgroundColor: 'rgba(91, 192, 150, 0.7)',
+                                                }],
+                                            }}
+                                            options={{ responsive: true, plugins: { legend: { display: false } } }}
+                                        />
+                                    </div>
+                                )}
+
+                                {/* 카테고리별 소모량 Pie Chart */}
+                                {report.graphs?.by_category && (
+                                    <div className="w-full max-w-md mx-auto">
+                                        <h3 className="text-lg font-bold mb-2">카테고리별 소모량</h3>
+                                        <Pie
+                                            data={{
+                                                labels: report.graphs.by_category.map(c => c.category),
+                                                datasets: [{
+                                                    data: report.graphs.by_category.map(c => c.quantity),
+                                                    backgroundColor: ['#2e6e4bff', '#59c195ff', '#80f9a2ff', '#4d6e9fff', '#F87171'],
+                                                }],
+                                            }}
+                                            options={{ responsive: true }}
+                                        />
+                                    </div>
+                                )}
+                                
+                                {/* 출고 vs 폐기 Stacked Bar Chart */}
+                                {report.graphs?.usage_vs_disposal && (
+                                    <div className="w-full max-w-xl mx-auto">
+                                        <h3 className="text-lg font-bold mb-2">출고 vs 폐기</h3>
+                                        <Bar
+                                            data={{
+                                                labels: report.graphs.usage_vs_disposal.map(i => i.item_name),
+                                                datasets: [
+                                                    {
+                                                        label: '출고',
+                                                        data: report.graphs.usage_vs_disposal.map(i => i['출고']),
+                                                        backgroundColor: 'rgba(34, 197, 94, 0.7)',
+                                                    },
+                                                    {
+                                                        label: '폐기',
+                                                        data: report.graphs.usage_vs_disposal.map(i => i['폐기']),
+                                                        backgroundColor: 'rgba(239, 68, 68, 0.7)',
+                                                    }
+                                                ]
+                                            }}
+                                            options={{
+                                                responsive: true,
+                                                plugins: { legend: { position: 'top' } },
+                                                scales: { x: { stacked: true }, y: { stacked: true } }
+                                            }}
+                                        />
+                                    </div>
+                                )}
+                            </div> 
+
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );

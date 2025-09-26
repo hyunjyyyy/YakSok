@@ -5,7 +5,6 @@ import InventoryListPage from './pages/InventoryListPage';
 import AIReportPage from './pages/AIReportPage';
 import DetailPage from './pages/DetailPage';
 import GlobalStyle from './styles/GlobalStyle';
-
 import MapPage from './pages/MapPage';
 
 

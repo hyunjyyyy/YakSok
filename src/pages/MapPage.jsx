@@ -3,8 +3,8 @@ import MapContainer from '../components/map/MapContainer';
 
 const MapPage = () => {
   const pageStyle = {
-    width: '100vw',  // 화면 너비의 100%
-    height: '100vh', // 화면 높이의 100%
+    width: '100vw', 
+    height: '100vh', 
   };
 
   return (
