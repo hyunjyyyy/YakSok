@@ -16,7 +16,6 @@ import {
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);
 
-
 // --- 아이콘 컴포넌트 ---
 const SearchIcon = () => (
     <svg className="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
@@ -30,7 +29,7 @@ const ReportIcon = () => (
 );
 
 // --- 1. Header ---
-const Header = ({ setReport }) => {
+const Header = ({ setReport, setLoading }) => {
     const [query, setQuery] = useState('');
     const fileInputRef = useRef(null);
     const navigate = useNavigate();
@@ -50,6 +49,8 @@ const Header = ({ setReport }) => {
         const file = e.target.files[0];
         if (!file) return;
 
+        setLoading(true); // 로딩 시작
+
         try {
             const formData = new FormData();
             formData.append('file', file);
@@ -62,14 +63,17 @@ const Header = ({ setReport }) => {
             if (!res.ok) {
                 const text = await res.text();
                 alert(`업로드 실패: ${text}`);
+                setLoading(false);
                 return;
             }
 
             const data = await res.json();
-            setReport(data); // 부모 상태로 전달
+            setReport(data); // 리포트 전달
         } catch (error) {
             console.error(error);
             alert('서버 요청 중 오류 발생');
+        } finally {
+            setLoading(false); // 로딩 종료
         }
     };
 
@@ -130,17 +134,28 @@ const Navigation = () => {
 
 // --- 3. DashboardLayout ---
 const DashboardLayout = () => {
-    const [report, setReport] = useState(null); // 모달 상태
+    const [report, setReport] = useState(null);
+    const [loading, setLoading] = useState(false);
 
     return (
         <div className="bg-white min-h-screen">
             <div className="max-w-7xl mx-auto">
-                <Header setReport={setReport} />
+                <Header setReport={setReport} setLoading={setLoading} />
                 <Navigation />
                 <Outlet />
 
-                {/* 모달 */}
-                {report && (
+                {/* 로딩 모달 */}
+                {loading && (
+                    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+                        <div className="bg-white rounded-2xl shadow-2xl w-[400px] p-8 flex flex-col items-center">
+                            <div className="w-16 h-16 border-8 border-t-8 border-gray-200 border-t-green-600 rounded-full animate-spin mb-4"></div>
+                            <p className="text-gray-700 font-semibold">AI 리포트 생성 중...</p>
+                        </div>
+                    </div>
+                )}
+
+                {/* 리포트 모달 */}
+                {report && !loading && (
                     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
                         <div className="bg-white rounded-2xl shadow-2xl w-[850px] max-h-[650px] overflow-auto relative p-8 border border-gray-200">
 
@@ -151,18 +166,16 @@ const DashboardLayout = () => {
                             >
                                 ✕
                             </button>
-                            {/* PDF 다운로드 버튼 (모달 내부 우상단) */}
+
+                            {/* PDF 다운로드 버튼 */}
                             <button
-                                // onClick={handleDownloadModalPdf}
                                 className="absolute top-5 right-16 bg-[#2F6F59] text-white text-sm font-bold px-3 py-1.5 rounded-lg hover:opacity-90"
                             >
                                 PDF 다운로드
                             </button>
 
-                            {/* 제목 */}
                             <h2 className="text-3xl font-bold text-gray-800 mb-6">AI 리포트</h2>
 
-                            {/* 텍스트 */}
                             <div className="prose prose-sm md:prose-base text-gray-700 mb-6">
                                 {report.report_text.split('\n').map((line, idx) => {
                                     line = line.trim();
@@ -181,12 +194,10 @@ const DashboardLayout = () => {
                                 })}
                             </div>
 
-                            {/* 그래프 섹션 */}
                             <div className="space-y-8">
-
                                 {/* 품목별 소모량 Bar Chart */}
                                 {report.graphs?.by_item && (
-                                    <div className="w-full max-w-xl mx-auto"> {/* <- MODIFIED HERE: 최대 너비를 줄이고 가운데 정렬 */}
+                                    <div className="w-full max-w-xl mx-auto">
                                         <h3 className="text-lg font-bold mb-2">품목별 소모량</h3>
                                         <Bar
                                             data={{
@@ -204,7 +215,7 @@ const DashboardLayout = () => {
 
                                 {/* 카테고리별 소모량 Pie Chart */}
                                 {report.graphs?.by_category && (
-                                    <div className="w-full max-w-md mx-auto"> {/* <- MODIFIED HERE: 최대 너비를 더 줄여서 파이 차트 크기 조정 및 가운데 정렬 */}
+                                    <div className="w-full max-w-md mx-auto">
                                         <h3 className="text-lg font-bold mb-2">카테고리별 소모량</h3>
                                         <Pie
                                             data={{
@@ -221,7 +232,7 @@ const DashboardLayout = () => {
 
                                 {/* 출고 vs 폐기 Stacked Bar Chart */}
                                 {report.graphs?.usage_vs_disposal && (
-                                    <div className="w-full max-w-xl mx-auto"> {/* <- MODIFIED HERE: 최대 너비를 줄이고 가운데 정렬 */}
+                                    <div className="w-full max-w-xl mx-auto">
                                         <h3 className="text-lg font-bold mb-2">출고 vs 폐기</h3>
                                         <Bar
                                             data={{
@@ -247,7 +258,6 @@ const DashboardLayout = () => {
                                         />
                                     </div>
                                 )}
-
                             </div>
 
                         </div>
