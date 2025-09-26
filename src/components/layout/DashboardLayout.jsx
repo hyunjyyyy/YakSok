@@ -15,13 +15,11 @@ const ReportIcon = () => (
 );
 
 // --- 1. Header ---
-const Header = () => {
+const Header = ({ setReport }) => {
     const [query, setQuery] = useState('');
-    const [report, setReport] = useState(null);
     const fileInputRef = useRef(null);
     const navigate = useNavigate();
 
-    // 검색
     const handleSearch = (e) => {
         if (e.key === 'Enter' && query.trim() !== '') {
             navigate(`/detail/${query.trim()}`);
@@ -29,12 +27,10 @@ const Header = () => {
         }
     };
 
-    // CSV 버튼 클릭 → 파일 선택창
     const handleCsvButtonClick = () => {
         fileInputRef.current.click();
     };
 
-    // 파일 선택 후 서버 전송
     const handleFileChange = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -43,7 +39,6 @@ const Header = () => {
             const formData = new FormData();
             formData.append('file', file);
 
-            // ngrok 서버로 요청
             const res = await fetch('csv/reports/generate-from-csv', {
                 method: 'POST',
                 body: formData
@@ -56,7 +51,7 @@ const Header = () => {
             }
 
             const data = await res.json();
-            setReport(data);
+            setReport(data); // 부모 상태로 전달
         } catch (error) {
             console.error(error);
             alert('서버 요청 중 오류 발생');
@@ -98,14 +93,6 @@ const Header = () => {
                     onChange={handleFileChange}
                     style={{ display: 'none' }}
                 />
-
-                {/* 업로드 후 리포트 미리보기 */}
-                {report && (
-                    <div className="absolute top-full right-0 mt-2 p-4 bg-white shadow-lg rounded-lg w-[400px] max-h-[300px] overflow-auto z-20">
-                        <h2 className="font-bold mb-2">AI 리포트</h2>
-                        <pre className="text-xs whitespace-pre-wrap">{report.report_text}</pre>
-                    </div>
-                )}
             </div>
         </header>
     );
@@ -128,12 +115,30 @@ const Navigation = () => {
 
 // --- 3. DashboardLayout ---
 const DashboardLayout = () => {
+    const [report, setReport] = useState(null); // 모달 상태
+
     return (
         <div className="bg-white min-h-screen">
             <div className="max-w-7xl mx-auto">
-                <Header />
+                <Header setReport={setReport} />
                 <Navigation />
                 <Outlet />
+
+                {/* 모달 */}
+                {report && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                        <div className="bg-white rounded-xl shadow-2xl w-[800px] max-h-[600px] overflow-auto relative p-6">
+                            <button
+                                onClick={() => setReport(null)}
+                                className="absolute top-3 right-3 text-gray-500 hover:text-black text-xl font-bold"
+                            >
+                                ✕
+                            </button>
+                            <h2 className="text-2xl font-bold mb-4">AI 리포트</h2>
+                            <pre className="text-sm whitespace-pre-wrap">{report.report_text}</pre>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
