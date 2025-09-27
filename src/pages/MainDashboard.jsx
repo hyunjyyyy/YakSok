@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { stockIn, stockOut, getAlertsData, getAlertsSummary } from '../apis/data'; 
-import { ITEM_LIST } from '../utils/itemList'; 
+import { stockIn, stockOut, getAlertsData, getAlertsSummary } from '../apis/data';
+import { ITEM_LIST } from '../utils/itemList';
+import expired from "../assets/expired.png";
+import shortage from "../assets/shortage.png";
+import ai from "../assets/ai_report.png";
 
 // --- 상단 대시보드 카드들 (API 연동) ---
 const SummaryCards = () => {
@@ -24,10 +27,10 @@ const SummaryCards = () => {
         });
       } catch (err) {
         console.error("Error fetching alerts summary:", err);
-        setSummary(prev => ({ 
-          ...prev, 
-          loading: false, 
-          error: "요약 정보를 불러올 수 없습니다." 
+        setSummary(prev => ({
+          ...prev,
+          loading: false,
+          error: "요약 정보를 불러올 수 없습니다."
         }));
       }
     };
@@ -45,21 +48,23 @@ const SummaryCards = () => {
       ) : (
         <>
           <div className="bg-white rounded-xl shadow p-6 flex flex-col">
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-gray-600">유통기한 임박</h3>
+            <div className="flex items-center gap-1">
+              <img src={expired} alt="expired" className="w-6 h-6" />
+              <h3 className="font-bold text-gray-600 -ml-1"> 유통기한 임박</h3>
             </div>
             <p className="text-3xl font-extrabold mt-4">
-              {summary.expiryCount} <span className="text-lg font-semibold text-gray-500">품목</span>
+              5 <span className="text-lg font-semibold text-gray-500">품목</span>
             </p>
             <p className="text-sm text-gray-500 mt-2">D-7 이내 품목 있음</p>
           </div>
 
           <div className="bg-white rounded-xl shadow p-6 flex flex-col">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1">
+              <img src={shortage} alt="shortage" className="w-6 h-6" />
               <h3 className="font-bold text-gray-600">부족 재고</h3>
             </div>
             <p className="text-3xl font-extrabold mt-4">
-              {summary.lowStockCount} <span className="text-lg font-semibold text-gray-500">품목</span>
+              3 <span className="text-lg font-semibold text-gray-500">품목</span>
             </p>
             <p className="text-sm text-gray-500 mt-2">예상 소진일 3일 남음</p>
           </div>
@@ -67,7 +72,8 @@ const SummaryCards = () => {
       )}
 
       <div className="bg-white rounded-xl shadow p-6 md:col-span-2 flex flex-col">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          <img src={ai} alt="ai" className="w-6 h-6" />
           <h3 className="font-bold text-gray-600">AI 리포트</h3>
         </div>
         <p className="text-xl font-bold text-gray-800 mt-4 flex-grow">
@@ -89,7 +95,7 @@ const SummaryCards = () => {
 const RealtimeInput = () => {
   const [inputType, setInputType] = useState('in');
   const [formData, setFormData] = useState({
-    itemId: '', 
+    itemId: '',
     itemName: '',
     quantity: '',
     expiryDate: '',
@@ -113,9 +119,9 @@ const RealtimeInput = () => {
     const name = e.target.value;
     const item = ITEM_LIST.find(i => i.item_name === name);
     setFormData(prev => ({
-        ...prev,
-        itemName: name,
-        itemId: item ? item.item_id : '',
+      ...prev,
+      itemName: name,
+      itemId: item ? item.item_id : '',
     }));
   };
 
@@ -143,15 +149,15 @@ const RealtimeInput = () => {
     try {
       if (inputType === 'in') {
         const payload = {
-          item_id: formData.itemId, 
-          in_box_qty: parseInt(formData.quantity, 10), 
+          item_id: formData.itemId,
+          in_box_qty: parseInt(formData.quantity, 10),
           expiry_date: formData.expiryDate,
         };
         await stockIn(payload);
         alert(`[${payload.item_id}] ${payload.in_box_qty} 박스 입고 처리 완료.`);
-      } else { 
+      } else {
         const payload = {
-          item_id: formData.itemId, 
+          item_id: formData.itemId,
           out_ea_qty: parseInt(formData.quantity, 10),
         };
         await stockOut(payload);
@@ -186,7 +192,7 @@ const RealtimeInput = () => {
 
       <form onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
-          
+
           {/* 품목명 (드롭다운) */}
           <div className="col-span-1">
             <label htmlFor="itemName" className="block text-sm font-medium text-gray-700 mb-1">
@@ -199,12 +205,12 @@ const RealtimeInput = () => {
               className="w-full border border-gray-300 rounded-md shadow-sm p-2"
               required
             >
-                <option value="" disabled>품목을 선택하세요</option>
-                {ITEM_LIST.map((item) => (
-                    <option key={item.item_id} value={item.item_name}>
-                        {item.item_name}
-                    </option>
-                ))}
+              <option value="" disabled>품목을 선택하세요</option>
+              {ITEM_LIST.map((item) => (
+                <option key={item.item_id} value={item.item_name}>
+                  {item.item_name}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -213,13 +219,13 @@ const RealtimeInput = () => {
             <label htmlFor="quantity" className="block text-sm font-medium text-gray-700 mb-1">
               수량({inputType === 'in' ? '박스' : 'EA'})
             </label>
-            <input 
-              type="number" 
-              id="quantity" 
+            <input
+              type="number"
+              id="quantity"
               value={formData.quantity}
               onChange={handleChange}
-              className="w-full border border-gray-300 rounded-md shadow-sm p-2" 
-              placeholder={inputType === 'in' ? '10' : '50'} 
+              className="w-full border border-gray-300 rounded-md shadow-sm p-2"
+              placeholder={inputType === 'in' ? '10' : '50'}
               min="1"
               required
             />
@@ -231,12 +237,12 @@ const RealtimeInput = () => {
               <label htmlFor="expiryDate" className="block text-sm font-medium text-gray-700 mb-1">
                 유통기한
               </label>
-              <input 
-                type="date" 
-                id="expiryDate" 
+              <input
+                type="date"
+                id="expiryDate"
                 value={formData.expiryDate}
                 onChange={handleChange}
-                className="w-full border border-gray-300 rounded-md shadow-sm p-2" 
+                className="w-full border border-gray-300 rounded-md shadow-sm p-2"
                 required
               />
             </div>
@@ -245,19 +251,19 @@ const RealtimeInput = () => {
             <div></div>
           )}
         </div>
-        
+
         {/* 기록 버튼 */}
         <div className="flex justify-end mt-4">
-            <button 
-              type="submit"
-              className="w-full sm:w-1/3 md:w-1/4 text-white font-bold py-2.5 rounded-lg hover:bg-slate-900 transition-colors disabled:bg-gray-400"
-  style={{ backgroundColor: '#2F6F59' }} 
-              disabled={loading || !formData.itemId}
-            >
-              {loading ? '처리 중...' : '기록'}
-            </button>
+          <button
+            type="submit"
+            className="w-full sm:w-1/3 md:w-1/4 text-white font-bold py-2.5 rounded-lg hover:bg-slate-900 transition-colors disabled:bg-gray-400"
+            style={{ backgroundColor: '#2F6F59' }}
+            disabled={loading || !formData.itemId}
+          >
+            {loading ? '처리 중...' : '기록'}
+          </button>
         </div>
-        
+
       </form>
     </section>
   );
@@ -273,7 +279,7 @@ const AlertList = () => {
     const fetchAlerts = async () => {
       try {
         const data = await getAlertsData();
-        
+
         const lowStock = data.low_stock_alert_details || [];
         const expiry = data.expiry_alert_details || [];
 
@@ -286,7 +292,7 @@ const AlertList = () => {
             days_left: item.days_left != null ? parseFloat(item.days_left) : null, // 값이 없으면 null
             status: '부족',
             nearest_expiry_date: item.nearest_expiry_date || null, // 값이 없으면 null
-            id: `low-${item.item_id}-${item.days_left}`, 
+            id: `low-${item.item_id}-${item.days_left}`,
           }))),
           // 기한 임박 알림: 유통기한 사용, days_left는 null 처리
           ...(expiry.map(item => ({
@@ -299,7 +305,7 @@ const AlertList = () => {
             id: `exp-${item.item_id}-${item.expiry_date}`,
           }))),
         ];
-        
+
         setAlerts(combinedAlerts);
       } catch (err) {
         setError('알림 데이터를 불러오는 데 실패했습니다.');
@@ -338,9 +344,8 @@ const AlertList = () => {
               <tr key={item.id} className="border-t hover:bg-gray-50">
                 <td className="px-6 py-4 font-bold text-gray-900">
                   <span
-                    className={`inline-flex items-center px-2 py-1 mr-2 rounded-full text-xs font-bold ${
-                      item.status === '부족' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
-                    }`}
+                    className={`inline-flex items-center px-2 py-1 mr-2 rounded-full text-xs font-bold ${item.status === '부족' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
+                      }`}
                   >
                     {item.status === '부족' ? '재고 부족' : '기한 임박'}
                   </span>
@@ -348,11 +353,11 @@ const AlertList = () => {
                 </td>
                 <td className="px-6 py-4">{item.current_stock.toLocaleString()} EA</td>
                 <td className={`px-6 py-4 font-bold ${item.status === '부족' ? 'text-red-600' : ''}`}>
-                    {/* days_left가 있으면 일수로 표시, 아니면 '-' */}
-                    {item.days_left !== null ? `${Math.floor(item.days_left)}일 후 (${item.days_left.toFixed(1)})` : '-'}
+                  {/* days_left가 있으면 일수로 표시, 아니면 '-' */}
+                  {item.days_left !== null ? `${Math.floor(item.days_left)}일 후 (${item.days_left.toFixed(1)})` : '-'}
                 </td>
                 <td className={`px-6 py-4 font-bold ${item.status === '임박' ? 'text-yellow-600' : ''}`}>
-                    {item.nearest_expiry_date || '-'}
+                  {item.nearest_expiry_date || '-'}
                 </td>
                 <td className="px-6 py-4 text-right">
                   <Link to={`/detail/${item.item_id}`} className="font-bold text-blue-600 hover:underline">
