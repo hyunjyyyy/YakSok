@@ -251,7 +251,7 @@ const MapContainer = () => {
       <div
         id="map"
         style={{
-          width: "83%",
+          width: "75%",
           height: "80%",
           position: "relative",
           zIndex: 0,

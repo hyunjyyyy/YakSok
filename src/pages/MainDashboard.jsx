@@ -292,7 +292,7 @@ const AlertList = () => {
           ...(expiry.map(item => ({
             item_id: item.item_id,
             item_name: item.item_name,
-            current_stock: Number(item.current_batch_ea || 0), // 값이 없으면 0으로 처리
+            current_stock: Number(item.batch_stock_ea || 0), // 값이 없으면 0으로 처리
             days_left: null, // 예상 소진일 정보 없음
             status: '임박',
             nearest_expiry_date: item.expiry_date || null, // 값이 없으면 null
