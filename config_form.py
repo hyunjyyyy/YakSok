@@ -5,8 +5,8 @@
 DB_CONFIG = {
     'user': 'root',
     'host': 'localhost',
-    'password':'WEarlyPW2024!',
+    'password':'password',
     'database': 'yaksok',
     'port':'3306'
 }
-GEMINI_API_KEY='AIzaSyAtKYhWWDQDVU-hpkH3JPNpglzfhxr0-To'
+GEMINI_API_KEY='gemini_api_real_key'
