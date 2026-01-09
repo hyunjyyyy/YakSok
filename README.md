@@ -39,4 +39,5 @@ python app.py
 
 ## 🤝 팀 정보
 Team: [포텐셜]
+
 Members: 유현지, 서정인, 조예린, 박소현
